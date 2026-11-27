@@ -4,19 +4,16 @@
    ========================================================================== */
 
 :root {
-  /* Core Surfaces */
   --bg-canvas: hsl(212, 20%, 8%);
   --bg-surface-1: hsl(212, 18%, 11.5%);
   --bg-surface-2: hsl(212, 16%, 15%);
   --bg-surface-3: hsl(212, 15%, 19%);
   --bg-well: hsl(214, 22%, 6.5%);
 
-  /* Typography Colors */
   --text-primary: hsl(40, 26%, 95%);
   --text-secondary: hsl(212, 12%, 68%);
   --text-muted: hsl(212, 10%, 48%);
 
-  /* Player & Functional Accents (Zero purple/violet) */
   --accent-p1: hsl(26, 91%, 56%);
   --accent-p1-hover: hsl(26, 93%, 62%);
   --accent-p1-soft: hsla(26, 91%, 56%, 0.15);
@@ -29,7 +26,6 @@
   --status-warn: hsl(38, 92%, 56%);
   --status-danger: hsl(8, 80%, 58%);
 
-  /* Neutral Structural Hairlines & Tactile Shadows */
   --hairline: hsla(40, 20%, 92%, 0.08);
   --hairline-strong: hsla(40, 20%, 92%, 0.14);
   --shadow-raised:
@@ -44,12 +40,10 @@
     0 2px 6px hsla(215, 45%, 3%, 0.72) inset,
     0 1px 0 hsla(40, 25%, 94%, 0.05);
 
-  /* Typography Families */
   --font-display: 'Space Grotesk', system-ui, -apple-system, sans-serif;
   --font-sans: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
   --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, monospace;
 
-  /* Radii & Spacing */
   --radius-xs: 8px;
   --radius-sm: 12px;
   --radius-md: 16px;
@@ -61,7 +55,6 @@
   --safe-right: env(safe-area-inset-right, 0px);
 }
 
-/* Reset & Base */
 *,
 *::before,
 *::after {
@@ -86,7 +79,14 @@ body {
   overscroll-behavior-y: none;
 }
 
-/* Tactile Matte Hardware Grain */
+/* Lock viewport strictly to 100dvh while inside an active game so zero pixels overflow on phones */
+body.in-game {
+  height: 100vh;
+  height: 100dvh;
+  max-height: 100dvh;
+  overflow: hidden;
+}
+
 .grain-overlay {
   position: fixed;
   inset: 0;
@@ -112,7 +112,6 @@ body {
   border: 0;
 }
 
-/* App Shell */
 .app-shell {
   min-height: 100dvh;
   display: flex;
@@ -123,6 +122,13 @@ body {
   padding-right: var(--safe-right);
 }
 
+body.in-game .app-shell {
+  height: 100vh;
+  height: 100dvh;
+  max-height: 100dvh;
+  overflow: hidden;
+}
+
 /* ==========================================================================
    Top Bar
    ========================================================================== */
@@ -131,21 +137,22 @@ body {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 12px clamp(14px, 3vw, 28px);
+  padding: 10px clamp(12px, 3vw, 28px);
   background: var(--bg-surface-1);
   border-bottom: 1px solid var(--hairline);
   position: sticky;
   top: 0;
   z-index: 40;
+  flex-shrink: 0;
 }
 
 .brand-btn {
   display: inline-flex;
   align-items: center;
-  gap: 11px;
+  gap: 10px;
   background: transparent;
   border: none;
-  padding: 4px 6px 4px 2px;
+  padding: 3px 6px 3px 2px;
   border-radius: var(--radius-sm);
   color: inherit;
   cursor: pointer;
@@ -162,9 +169,9 @@ body {
 }
 
 .brand-icon {
-  width: 34px;
-  height: 34px;
-  border-radius: 9px;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.45);
   flex-shrink: 0;
 }
@@ -178,14 +185,14 @@ body {
 .brand-name {
   font-family: var(--font-display);
   font-weight: 700;
-  font-size: 1.02rem;
+  font-size: 1rem;
   letter-spacing: -0.02em;
   color: var(--text-primary);
 }
 
 .brand-tag {
   font-family: var(--font-mono);
-  font-size: 0.65rem;
+  font-size: 0.63rem;
   font-weight: 500;
   letter-spacing: 0.06em;
   color: var(--text-muted);
@@ -195,21 +202,21 @@ body {
 .topbar-actions {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 7px;
 }
 
 .profile-chip {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  height: 36px;
-  padding: 0 11px;
+  gap: 7px;
+  height: 34px;
+  padding: 0 10px;
   border-radius: var(--radius-xs);
   border: 1px solid var(--hairline-strong);
   background: var(--bg-surface-2);
   color: var(--text-primary);
   font-family: var(--font-sans);
-  font-size: 0.84rem;
+  font-size: 0.82rem;
   font-weight: 600;
   cursor: pointer;
   box-shadow: var(--shadow-keycap);
@@ -233,7 +240,7 @@ body {
 }
 
 .profile-name {
-  max-width: 108px;
+  max-width: 104px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -241,31 +248,32 @@ body {
 
 .device-tag {
   font-family: var(--font-mono);
-  font-size: 0.68rem;
-  padding: 2px 6px;
+  font-size: 0.66rem;
+  padding: 2px 5px;
   border-radius: 5px;
   background: var(--bg-well);
   color: var(--text-secondary);
 }
 
 /* ==========================================================================
-   Buttons & Inputs (Tactile Hardware Feel)
+   Buttons & Inputs
    ========================================================================== */
 .btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
+  gap: 7px;
   min-height: 42px;
-  padding: 0 18px;
+  padding: 0 16px;
   border-radius: var(--radius-xs);
   border: 1px solid transparent;
   font-family: var(--font-sans);
-  font-size: 0.92rem;
+  font-size: 0.9rem;
   font-weight: 600;
   letter-spacing: -0.01em;
   cursor: pointer;
   user-select: none;
+  white-space: nowrap;
   transition:
     background-color 0.14s ease,
     transform 0.08s ease,
@@ -329,15 +337,15 @@ body {
 }
 
 .btn-compact {
-  min-height: 34px;
-  padding: 0 12px;
-  font-size: 0.82rem;
+  min-height: 32px;
+  padding: 0 10px;
+  font-size: 0.8rem;
 }
 
 .btn-large {
-  min-height: 48px;
-  padding: 0 22px;
-  font-size: 0.98rem;
+  min-height: 46px;
+  padding: 0 20px;
+  font-size: 0.96rem;
 }
 
 .btn-block {
@@ -348,14 +356,15 @@ body {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 36px;
-  height: 36px;
+  width: 34px;
+  height: 34px;
   border-radius: var(--radius-xs);
   border: 1px solid var(--hairline);
   background: var(--bg-surface-2);
   color: var(--text-secondary);
   cursor: pointer;
   box-shadow: var(--shadow-keycap);
+  flex-shrink: 0;
   transition: background-color 0.14s ease, color 0.14s ease, transform 0.08s ease;
 }
 
@@ -370,7 +379,7 @@ body {
 
 .code-input,
 .text-input {
-  height: 48px;
+  height: 46px;
   border-radius: var(--radius-xs);
   border: 1px solid var(--hairline-strong);
   background: var(--bg-well);
@@ -391,15 +400,15 @@ body {
 .code-input {
   font-family: var(--font-mono);
   font-weight: 700;
-  font-size: 1.08rem;
-  letter-spacing: 0.22em;
+  font-size: 1.05rem;
+  letter-spacing: 0.2em;
   text-transform: uppercase;
   text-align: center;
-  width: 146px;
+  width: 144px;
 }
 
 .code-input::placeholder {
-  letter-spacing: 0.12em;
+  letter-spacing: 0.1em;
   color: var(--text-muted);
   font-weight: 500;
 }
@@ -412,23 +421,24 @@ body {
   align-items: center;
   justify-content: space-between;
   flex-wrap: wrap;
-  gap: 10px 16px;
-  padding: 9px clamp(14px, 3vw, 28px);
+  gap: 8px 14px;
+  padding: 8px clamp(12px, 3vw, 28px);
   background: var(--bg-surface-2);
   border-bottom: 1px solid var(--hairline-strong);
   z-index: 35;
+  flex-shrink: 0;
 }
 
 .session-strip-left {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 9px;
   min-width: 0;
 }
 
 .status-led {
-  width: 10px;
-  height: 10px;
+  width: 9px;
+  height: 9px;
   border-radius: 50%;
   flex-shrink: 0;
   background: var(--status-warn);
@@ -456,34 +466,38 @@ body {
   display: flex;
   flex-direction: column;
   line-height: 1.2;
+  min-width: 0;
 }
 
 .session-status-label {
-  font-size: 0.84rem;
+  font-size: 0.82rem;
   font-weight: 700;
   color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .session-sublabel {
   font-family: var(--font-mono);
-  font-size: 0.72rem;
+  font-size: 0.7rem;
   color: var(--text-secondary);
 }
 
 .session-strip-center {
   display: inline-flex;
   align-items: center;
-  gap: 10px;
-  padding: 5px 14px;
+  gap: 9px;
+  padding: 4px 12px;
   border-radius: var(--radius-xs);
   background: var(--bg-well);
   box-shadow: var(--shadow-well);
-  font-size: 0.85rem;
+  font-size: 0.82rem;
 }
 
 .score-player {
   font-weight: 600;
-  max-width: 96px;
+  max-width: 88px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -499,7 +513,7 @@ body {
 
 .score-tally {
   font-family: var(--font-mono);
-  font-size: 0.92rem;
+  font-size: 0.9rem;
   display: inline-flex;
   align-items: center;
   gap: 5px;
@@ -509,25 +523,26 @@ body {
 .session-strip-right {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   margin-left: auto;
 }
 
-.reaction-bar {
+.reaction-bar,
+.stage-mini-reactions {
   display: inline-flex;
   align-items: center;
   gap: 4px;
 }
 
 .reaction-btn {
-  height: 32px;
-  padding: 0 9px;
+  height: 30px;
+  padding: 0 8px;
   border-radius: 7px;
   border: 1px solid var(--hairline);
   background: var(--bg-surface-1);
   color: var(--text-primary);
   font-family: var(--font-sans);
-  font-size: 0.78rem;
+  font-size: 0.76rem;
   font-weight: 600;
   cursor: pointer;
   transition: background-color 0.12s ease, transform 0.08s ease;
@@ -551,21 +566,27 @@ body {
   width: 100%;
   max-width: 1180px;
   margin: 0 auto;
-  padding: clamp(16px, 3vw, 34px) clamp(14px, 3vw, 28px);
+  padding: clamp(14px, 2.8vw, 30px) clamp(12px, 3vw, 28px);
+  min-height: 0;
+}
+
+body.in-game .main-content {
+  padding: 10px clamp(10px, 2vw, 22px);
+  overflow: hidden;
 }
 
 .view-hub {
   display: flex;
   flex-direction: column;
-  gap: clamp(26px, 4vw, 42px);
+  gap: clamp(22px, 3.5vw, 38px);
 }
 
 .hub-intro {
   display: grid;
   grid-template-columns: 1.15fr 1fr;
-  gap: clamp(20px, 3.5vw, 36px);
+  gap: clamp(18px, 3vw, 34px);
   align-items: center;
-  padding: clamp(20px, 3.2vw, 32px);
+  padding: clamp(18px, 3vw, 30px);
   border-radius: var(--radius-lg);
   background: var(--bg-surface-1);
   border: 1px solid var(--hairline);
@@ -573,9 +594,9 @@ body {
 }
 
 .hub-title {
-  margin: 0 0 10px;
+  margin: 0 0 8px;
   font-family: var(--font-display);
-  font-size: clamp(1.65rem, 3.3vw, 2.45rem);
+  font-size: clamp(1.5rem, 3.2vw, 2.35rem);
   font-weight: 700;
   line-height: 1.1;
   letter-spacing: -0.028em;
@@ -584,7 +605,7 @@ body {
 
 .hub-subtitle {
   margin: 0;
-  font-size: clamp(0.92rem, 1.4vw, 1.03rem);
+  font-size: clamp(0.9rem, 1.4vw, 1.02rem);
   color: var(--text-secondary);
   max-width: 52ch;
 }
@@ -592,8 +613,8 @@ body {
 .connect-panel {
   display: flex;
   flex-direction: column;
-  gap: 14px;
-  padding: 18px;
+  gap: 12px;
+  padding: 16px;
   border-radius: var(--radius-md);
   background: var(--bg-surface-2);
   border: 1px solid var(--hairline);
@@ -602,11 +623,11 @@ body {
 .connect-create {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 5px;
 }
 
 .connect-hint {
-  font-size: 0.78rem;
+  font-size: 0.76rem;
   color: var(--text-muted);
   text-align: center;
 }
@@ -616,7 +637,7 @@ body {
   align-items: center;
   gap: 10px;
   color: var(--text-muted);
-  font-size: 0.76rem;
+  font-size: 0.74rem;
   text-transform: uppercase;
   letter-spacing: 0.08em;
 }
@@ -641,15 +662,14 @@ body {
 }
 
 .connect-join .btn {
-  min-height: 48px;
-  padding: 0 20px;
+  min-height: 46px;
+  padding: 0 18px;
 }
 
-/* Games Section */
 .games-section {
   display: flex;
   flex-direction: column;
-  gap: 18px;
+  gap: 16px;
 }
 
 .section-header {
@@ -663,14 +683,14 @@ body {
 .section-title {
   margin: 0;
   font-family: var(--font-display);
-  font-size: 1.28rem;
+  font-size: 1.22rem;
   font-weight: 700;
   letter-spacing: -0.02em;
 }
 
 .section-caption {
   margin: 0;
-  font-size: 0.88rem;
+  font-size: 0.86rem;
   color: var(--text-secondary);
 }
 
@@ -700,7 +720,7 @@ body {
   position: relative;
   background: var(--bg-well);
   border-bottom: 1px solid var(--hairline);
-  padding: 14px 16px 10px;
+  padding: 12px 14px 8px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -708,7 +728,7 @@ body {
 
 .art-svg {
   width: 100%;
-  max-width: 260px;
+  max-width: 250px;
   height: auto;
   display: block;
 }
@@ -718,7 +738,7 @@ body {
   top: 10px;
   right: 10px;
   font-family: var(--font-mono);
-  font-size: 0.68rem;
+  font-size: 0.66rem;
   padding: 3px 8px;
   border-radius: 6px;
   background: hsla(212, 20%, 12%, 0.88);
@@ -727,35 +747,35 @@ body {
 }
 
 .game-body {
-  padding: 18px;
+  padding: 16px;
   display: flex;
   flex-direction: column;
   flex: 1;
-  gap: 12px;
+  gap: 10px;
 }
 
 .game-title {
   margin: 0;
   font-family: var(--font-display);
-  font-size: 1.18rem;
+  font-size: 1.15rem;
   font-weight: 700;
   letter-spacing: -0.02em;
 }
 
 .game-desc {
   margin: 0;
-  font-size: 0.89rem;
+  font-size: 0.88rem;
   color: var(--text-secondary);
-  line-height: 1.5;
+  line-height: 1.48;
   flex: 1;
 }
 
 .game-controls-meta {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px 12px;
+  gap: 5px 12px;
   font-family: var(--font-mono);
-  font-size: 0.72rem;
+  font-size: 0.71rem;
   color: var(--text-muted);
   padding-top: 4px;
   border-top: 1px solid var(--hairline);
@@ -766,52 +786,64 @@ body {
 }
 
 /* ==========================================================================
-   Active Game Stage
+   Active Game Stage (100% Fit on Mobile & Desktop)
    ========================================================================== */
 .view-game {
   flex: 1;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 8px;
   min-height: 0;
+  height: 100%;
+  overflow: hidden;
 }
 
 .game-stage-bar {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
-  flex-wrap: wrap;
+  gap: 8px;
+  flex-wrap: nowrap;
+  flex-shrink: 0;
+  min-height: 36px;
 }
 
 .stage-title-group {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .stage-title {
   margin: 0;
   font-family: var(--font-display);
-  font-size: 1.12rem;
+  font-size: 1.05rem;
   font-weight: 700;
   letter-spacing: -0.02em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .stage-badge {
   font-family: var(--font-mono);
-  font-size: 0.72rem;
-  padding: 3px 8px;
+  font-size: 0.68rem;
+  padding: 2px 7px;
   border-radius: 6px;
   background: var(--bg-surface-2);
   color: var(--text-secondary);
   border: 1px solid var(--hairline);
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .stage-controls {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
+  flex-shrink: 0;
 }
 
 .game-mount {
@@ -822,28 +854,31 @@ body {
   justify-content: center;
   position: relative;
   min-height: 0;
+  width: 100%;
+  overflow: hidden;
 }
 
 /* Shared Game HUD Scoreboard */
 .match-hud {
   width: 100%;
-  max-width: 560px;
+  max-width: 540px;
   display: grid;
   grid-template-columns: 1fr auto 1fr;
   align-items: center;
-  gap: 10px;
-  padding: 10px 14px;
-  margin-bottom: 10px;
+  gap: 8px;
+  padding: 7px 12px;
+  margin-bottom: 6px;
   border-radius: var(--radius-sm);
   background: var(--bg-surface-1);
   border: 1px solid var(--hairline);
   box-shadow: var(--shadow-raised);
+  flex-shrink: 0;
 }
 
 .hud-side {
   display: flex;
   align-items: center;
-  gap: 9px;
+  gap: 8px;
   min-width: 0;
 }
 
@@ -853,8 +888,8 @@ body {
 }
 
 .hud-swatch {
-  width: 12px;
-  height: 12px;
+  width: 10px;
+  height: 10px;
   border-radius: 50%;
   flex-shrink: 0;
 }
@@ -871,11 +906,11 @@ body {
   display: flex;
   flex-direction: column;
   min-width: 0;
-  line-height: 1.2;
+  line-height: 1.15;
 }
 
 .hud-player-name {
-  font-size: 0.86rem;
+  font-size: 0.82rem;
   font-weight: 700;
   white-space: nowrap;
   overflow: hidden;
@@ -884,8 +919,11 @@ body {
 
 .hud-player-role {
   font-family: var(--font-mono);
-  font-size: 0.68rem;
+  font-size: 0.64rem;
   color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .hud-side.active-turn .hud-player-name {
@@ -904,7 +942,7 @@ body {
   display: flex;
   flex-direction: column;
   align-items: center;
-  padding: 3px 12px;
+  padding: 2px 10px;
   border-radius: var(--radius-xs);
   background: var(--bg-well);
   box-shadow: var(--shadow-well);
@@ -912,31 +950,49 @@ body {
 
 .hud-score-big {
   font-family: var(--font-mono);
-  font-size: 1.18rem;
+  font-size: 1.05rem;
   font-weight: 700;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.05em;
+  line-height: 1.2;
 }
 
 .hud-substatus {
-  font-size: 0.68rem;
+  font-size: 0.64rem;
   color: var(--text-secondary);
   white-space: nowrap;
+}
+
+/* Flexible Stage Wrappers (measured dynamically via ResizeObserver) */
+.hockey-wrap,
+.c4-wrap,
+.ttt-wrap {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  position: relative;
+}
+
+.hockey-stage-box,
+.board-stage-box {
+  flex: 1;
+  width: 100%;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
 }
 
 /* ==========================================================================
    GAME 1: Neo Air Hockey Stage
    ========================================================================== */
-.hockey-wrap {
-  width: 100%;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-}
-
 .hockey-arena-frame {
   position: relative;
-  padding: 10px;
-  border-radius: 24px;
+  padding: 8px;
+  border-radius: 22px;
   background: var(--bg-surface-2);
   border: 1px solid var(--hairline-strong);
   box-shadow: var(--shadow-raised);
@@ -946,34 +1002,28 @@ body {
 
 .hockey-canvas {
   display: block;
-  border-radius: 16px;
+  border-radius: 14px;
   background: var(--bg-well);
   touch-action: none;
   cursor: none;
 }
 
 .hockey-help-caption {
-  margin-top: 8px;
+  margin-top: 6px;
   font-family: var(--font-mono);
-  font-size: 0.74rem;
+  font-size: 0.72rem;
   color: var(--text-muted);
   text-align: center;
+  flex-shrink: 0;
 }
 
 /* ==========================================================================
    GAME 2: Connect 4 Rack
    ========================================================================== */
-.c4-wrap {
-  width: 100%;
-  max-width: 520px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-}
-
 .c4-board-shell {
   width: 100%;
-  padding: clamp(10px, 2.5vw, 16px);
+  max-width: 500px;
+  padding: clamp(8px, 2vw, 14px);
   border-radius: var(--radius-md);
   background: var(--bg-surface-2);
   border: 1px solid var(--hairline-strong);
@@ -985,9 +1035,9 @@ body {
 .c4-preview-row {
   display: grid;
   grid-template-columns: repeat(7, 1fr);
-  gap: clamp(5px, 1.4vw, 9px);
-  margin-bottom: 8px;
-  height: 26px;
+  gap: clamp(4px, 1.2vw, 8px);
+  margin-bottom: 6px;
+  height: 20px;
   align-items: center;
 }
 
@@ -999,8 +1049,8 @@ body {
 }
 
 .c4-preview-disc {
-  width: 20px;
-  height: 20px;
+  width: 16px;
+  height: 16px;
   border-radius: 50%;
   opacity: 0;
   transform: translateY(-4px) scale(0.85);
@@ -1022,9 +1072,9 @@ body {
 .c4-grid {
   display: grid;
   grid-template-columns: repeat(7, 1fr);
-  gap: clamp(5px, 1.4vw, 9px);
+  gap: clamp(4px, 1.2vw, 8px);
   background: var(--bg-well);
-  padding: clamp(8px, 2vw, 12px);
+  padding: clamp(6px, 1.6vw, 11px);
   border-radius: var(--radius-sm);
   box-shadow: var(--shadow-well);
 }
@@ -1032,7 +1082,7 @@ body {
 .c4-col-btn {
   display: flex;
   flex-direction: column;
-  gap: clamp(5px, 1.4vw, 9px);
+  gap: clamp(4px, 1.2vw, 8px);
   background: transparent;
   border: none;
   padding: 0;
@@ -1084,22 +1134,14 @@ body {
 }
 
 .c4-disc.drop-anim {
-  animation: c4-drop-bounce 0.36s cubic-bezier(0.25, 1, 0.4, 1);
+  animation: c4-drop-bounce 0.34s cubic-bezier(0.25, 1, 0.4, 1);
 }
 
 @keyframes c4-drop-bounce {
-  0% {
-    transform: translateY(-280%) scale(0.96);
-  }
-  70% {
-    transform: translateY(0) scale(1);
-  }
-  85% {
-    transform: translateY(-14%) scale(1);
-  }
-  100% {
-    transform: translateY(0) scale(1);
-  }
+  0% { transform: translateY(-280%) scale(0.96); }
+  70% { transform: translateY(0) scale(1); }
+  85% { transform: translateY(-14%) scale(1); }
+  100% { transform: translateY(0) scale(1); }
 }
 
 .c4-disc.win-highlight {
@@ -1116,34 +1158,27 @@ body {
 /* ==========================================================================
    GAME 3: Infinite & Classic Tic-Tac-Toe
    ========================================================================== */
-.ttt-wrap {
-  width: 100%;
-  max-width: 440px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 12px;
-}
-
 .ttt-mode-bar {
   display: inline-flex;
-  padding: 4px;
+  padding: 3px;
   border-radius: var(--radius-xs);
   background: var(--bg-well);
   box-shadow: var(--shadow-well);
   border: 1px solid var(--hairline);
   gap: 4px;
+  flex-shrink: 0;
+  margin-bottom: 4px;
 }
 
 .ttt-mode-tab {
-  height: 32px;
-  padding: 0 13px;
+  height: 30px;
+  padding: 0 12px;
   border-radius: 6px;
   border: none;
   background: transparent;
   color: var(--text-secondary);
   font-family: var(--font-sans);
-  font-size: 0.8rem;
+  font-size: 0.78rem;
   font-weight: 600;
   cursor: pointer;
   transition: background-color 0.14s ease, color 0.14s ease;
@@ -1161,21 +1196,21 @@ body {
 }
 
 .ttt-rule-note {
-  margin: 0;
-  font-size: 0.8rem;
+  margin: 0 0 6px;
+  font-size: 0.76rem;
   color: var(--text-secondary);
   text-align: center;
+  flex-shrink: 0;
 }
 
 .ttt-board {
-  width: 100%;
-  max-width: 356px;
-  aspect-ratio: 1 / 1;
+  width: 320px;
+  height: 320px;
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   grid-template-rows: repeat(3, 1fr);
-  gap: 10px;
-  padding: 14px;
+  gap: 9px;
+  padding: 12px;
   border-radius: var(--radius-md);
   background: var(--bg-surface-2);
   border: 1px solid var(--hairline-strong);
@@ -1216,14 +1251,8 @@ body {
 }
 
 @keyframes pop-in {
-  from {
-    transform: scale(0.5);
-    opacity: 0;
-  }
-  to {
-    transform: scale(1);
-    opacity: 1;
-  }
+  from { transform: scale(0.5); opacity: 0; }
+  to { transform: scale(1); opacity: 1; }
 }
 
 .ttt-cell.vanishing-soon svg {
@@ -1232,11 +1261,11 @@ body {
 }
 
 .ttt-cell.vanishing-soon::after {
-  content: 'PRÓX. EN BORRARSE';
+  content: 'PRÓX.';
   position: absolute;
-  bottom: 6px;
+  bottom: 5px;
   font-family: var(--font-mono);
-  font-size: 0.52rem;
+  font-size: 0.5rem;
   letter-spacing: 0.04em;
   color: var(--text-muted);
 }
@@ -1251,33 +1280,38 @@ body {
 }
 
 /* ==========================================================================
-   Match Result Banner Overlay (Shared across games)
+   Match Result Floating Overlay (never pushes board off-screen!)
    ========================================================================== */
 .result-overlay {
-  margin-top: 12px;
-  width: 100%;
-  max-width: 520px;
-  padding: 16px 18px;
+  position: absolute;
+  bottom: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 30;
+  width: calc(100% - 16px);
+  max-width: 440px;
+  padding: 14px 16px;
   border-radius: var(--radius-md);
-  background: var(--bg-surface-2);
+  background: hsla(212, 18%, 13%, 0.96);
+  backdrop-filter: blur(8px);
   border: 1px solid var(--hairline-strong);
   box-shadow: var(--shadow-raised);
   display: flex;
   align-items: center;
   justify-content: space-between;
   flex-wrap: wrap;
-  gap: 12px;
-  animation: slide-up 0.2s ease-out;
+  gap: 10px;
+  animation: result-pop 0.18s ease-out;
 }
 
-@keyframes slide-up {
+@keyframes result-pop {
   from {
     opacity: 0;
-    transform: translateY(8px);
+    transform: translate(-50%, 10px);
   }
   to {
     opacity: 1;
-    transform: translateY(0);
+    transform: translate(-50%, 0);
   }
 }
 
@@ -1289,12 +1323,12 @@ body {
 
 .result-headline {
   font-family: var(--font-display);
-  font-size: 1.08rem;
+  font-size: 1.02rem;
   font-weight: 700;
 }
 
 .result-sub {
-  font-size: 0.82rem;
+  font-size: 0.8rem;
   color: var(--text-secondary);
 }
 
@@ -1310,26 +1344,28 @@ body {
   position: fixed;
   inset: 0;
   z-index: 90;
-  background: hsla(214, 30%, 4%, 0.76);
+  background: hsla(214, 30%, 4%, 0.78);
   backdrop-filter: blur(6px);
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 16px;
+  padding: 14px;
+  overflow-y: auto;
 }
 
 .modal-sheet {
   width: 100%;
-  max-width: 430px;
+  max-width: 420px;
+  max-height: calc(100dvh - 28px);
+  overflow-y: auto;
   border-radius: var(--radius-lg);
   background: var(--bg-surface-1);
   border: 1px solid var(--hairline-strong);
   box-shadow: var(--shadow-raised);
-  padding: 22px;
+  padding: 20px;
   display: flex;
   flex-direction: column;
-  gap: 18px;
-  animation: slide-up 0.16s ease-out;
+  gap: 16px;
 }
 
 .modal-header {
@@ -1342,14 +1378,14 @@ body {
 .modal-title {
   margin: 0;
   font-family: var(--font-display);
-  font-size: 1.22rem;
+  font-size: 1.18rem;
   font-weight: 700;
   letter-spacing: -0.02em;
 }
 
 .modal-subtitle {
   margin: 4px 0 0;
-  font-size: 0.85rem;
+  font-size: 0.84rem;
   color: var(--text-secondary);
 }
 
@@ -1362,9 +1398,9 @@ body {
 .mode-option-btn {
   display: flex;
   flex-direction: column;
-  gap: 5px;
+  gap: 4px;
   text-align: left;
-  padding: 14px 16px;
+  padding: 13px 15px;
   border-radius: var(--radius-sm);
   border: 1px solid var(--hairline-strong);
   background: var(--bg-surface-2);
@@ -1400,12 +1436,12 @@ body {
 
 .mode-option-title {
   font-weight: 700;
-  font-size: 0.95rem;
+  font-size: 0.93rem;
 }
 
 .mode-pill {
   font-family: var(--font-mono);
-  font-size: 0.68rem;
+  font-size: 0.66rem;
   padding: 2px 7px;
   border-radius: 5px;
   background: var(--bg-well);
@@ -1413,20 +1449,19 @@ body {
 }
 
 .mode-option-desc {
-  font-size: 0.82rem;
+  font-size: 0.8rem;
   color: var(--text-secondary);
 }
 
-/* Invite QR Body */
 .invite-body {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 16px;
+  gap: 14px;
 }
 
 .qr-well {
-  padding: 14px;
+  padding: 12px;
   border-radius: var(--radius-md);
   background: #f5f2eb;
   box-shadow: var(--shadow-raised);
@@ -1438,22 +1473,24 @@ body {
 #qr-canvas {
   display: block;
   border-radius: 6px;
+  max-width: 180px;
+  height: auto;
 }
 
 .invite-code-box {
   width: 100%;
-  padding: 12px 14px;
+  padding: 10px 14px;
   border-radius: var(--radius-sm);
   background: var(--bg-well);
   box-shadow: var(--shadow-well);
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 4px;
 }
 
 .invite-code-label {
   font-family: var(--font-mono);
-  font-size: 0.68rem;
+  font-size: 0.66rem;
   letter-spacing: 0.08em;
   color: var(--text-muted);
 }
@@ -1467,16 +1504,16 @@ body {
 
 .invite-code-value {
   font-family: var(--font-mono);
-  font-size: 1.55rem;
+  font-size: 1.48rem;
   font-weight: 700;
-  letter-spacing: 0.22em;
+  letter-spacing: 0.2em;
   color: var(--accent-p1);
 }
 
 .invite-actions {
   width: 100%;
   display: flex;
-  gap: 10px;
+  gap: 8px;
 }
 
 .invite-actions .btn {
@@ -1504,49 +1541,48 @@ body {
    ========================================================================== */
 .toast-stack {
   position: fixed;
-  bottom: calc(18px + var(--safe-bottom));
+  bottom: calc(14px + var(--safe-bottom));
   left: 50%;
   transform: translateX(-50%);
   z-index: 120;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   pointer-events: none;
   width: max-content;
-  max-width: calc(100vw - 32px);
+  max-width: calc(100vw - 24px);
+}
+
+body.in-game .toast-stack {
+  bottom: auto;
+  top: calc(50px + var(--safe-top));
 }
 
 .toast-item {
-  padding: 9px 15px;
+  padding: 8px 14px;
   border-radius: 999px;
   background: var(--bg-surface-3);
   border: 1px solid var(--hairline-strong);
   color: var(--text-primary);
-  font-size: 0.86rem;
+  font-size: 0.84rem;
   font-weight: 600;
   box-shadow: var(--shadow-raised);
-  animation: toast-in 0.2s ease-out;
+  animation: toast-in 0.18s ease-out;
 }
 
 .toast-item.reaction {
-  font-size: 0.95rem;
+  font-size: 0.92rem;
   background: var(--bg-surface-2);
 }
 
 @keyframes toast-in {
-  from {
-    opacity: 0;
-    transform: translateY(10px) scale(0.95);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-  }
+  from { opacity: 0; transform: translateY(8px) scale(0.95); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
 }
 
 /* ==========================================================================
-   Responsive Breakpoints (Tablet & Android Portrait)
+   Mobile & Immersive Arena Breakpoints (Android Phones Portrait & Landscape)
    ========================================================================== */
 @media (max-width: 960px) {
   .hub-intro {
@@ -1555,6 +1591,32 @@ body {
 
   .games-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+/* Collapse outer headers during active gameplay on phones / compact screens */
+@media (max-width: 820px), (max-height: 750px) {
+  body.in-game .topbar,
+  body.in-game .session-strip {
+    display: none !important;
+  }
+
+  body.in-game .main-content {
+    padding: 6px 8px;
+  }
+
+  body.in-game .view-game {
+    gap: 5px;
+  }
+
+  .hockey-help-caption {
+    display: none;
+  }
+}
+
+@media (max-height: 670px) {
+  .ttt-rule-note {
+    display: none;
   }
 }
 
@@ -1568,18 +1630,16 @@ body {
   }
 
   .profile-name {
-    max-width: 78px;
+    max-width: 74px;
   }
 
   .session-strip {
-    padding: 8px 12px;
-    gap: 8px;
+    padding: 7px 10px;
+    gap: 6px;
   }
 
   .session-strip-center {
-    order: 3;
-    width: 100%;
-    justify-content: center;
+    display: none;
   }
 
   .reaction-bar .reaction-btn:first-child {
@@ -1587,12 +1647,26 @@ body {
   }
 
   .main-content {
-    padding: 12px;
+    padding: 10px;
+  }
+
+  .stage-title {
+    display: none;
+  }
+
+  .stage-fs-label,
+  .stage-restart-label {
+    display: none;
   }
 
   .match-hud {
-    padding: 8px 10px;
-    margin-bottom: 8px;
+    padding: 5px 9px;
+    margin-bottom: 4px;
+  }
+
+  .hockey-arena-frame {
+    padding: 6px;
+    border-radius: 18px;
   }
 
   .result-overlay {

@@ -33,7 +33,6 @@ function checkWinner(board) {
   return null;
 }
 
-// Minimax AI supporting BOTH Infinite (3-piece FIFO) and Classic modes
 function chooseSmartMove(board, queues, variant, aiPlayer) {
   const human = aiPlayer === 1 ? 2 : 1;
 
@@ -59,7 +58,6 @@ function chooseSmartMove(board, queues, variant, aiPlayer) {
       if (b[i] === 0) empty.push(i);
     }
     if (empty.length === 0 || depth === 0) {
-      // Heuristic center + two-in-a-row count
       let score = b[4] === aiPlayer ? 4 : b[4] === human ? -4 : 0;
       for (const [x, y, z] of WIN_LINES) {
         const vals = [b[x], b[y], b[z]];
@@ -114,7 +112,7 @@ export function createTicTacToeGame(ctx) {
   const { mountEl, mode, isHost, localPlayerIndex, sendNet, onMatchWin, onRequestHub } = ctx;
   let players = { ...ctx.players };
 
-  let variant = 'infinite'; // 'infinite' | 'classic'
+  let variant = 'infinite';
   let board = Array(9).fill(0);
   let queues = { 1: [], 2: [] };
   let turn = 1;
@@ -156,10 +154,12 @@ export function createTicTacToeGame(ctx) {
       </div>
 
       <p class="ttt-rule-note" id="ttt-rule-note">
-        Máximo 3 marcas por jugador: al poner la 4.ª, tu marca más antigua se borra.
+        Máximo 3 marcas: al poner la 4.ª se borra la más antigua.
       </p>
 
-      <div class="ttt-board" id="ttt-board" role="grid" aria-label="Tablero de Tres en Raya"></div>
+      <div class="board-stage-box" id="ttt-stage-box">
+        <div class="ttt-board" id="ttt-board" role="grid" aria-label="Tablero de Tres en Raya"></div>
+      </div>
 
       <div class="result-overlay hidden" id="ttt-result">
         <div class="result-copy">
@@ -174,6 +174,7 @@ export function createTicTacToeGame(ctx) {
     </div>
   `;
 
+  const stageBox = mountEl.querySelector('#ttt-stage-box');
   const boardEl = mountEl.querySelector('#ttt-board');
   const side1El = mountEl.querySelector('#ttt-side-1');
   const side2El = mountEl.querySelector('#ttt-side-2');
@@ -189,6 +190,19 @@ export function createTicTacToeGame(ctx) {
   const resultBox = mountEl.querySelector('#ttt-result');
   const resultTitle = mountEl.querySelector('#ttt-result-title');
   const resultSub = mountEl.querySelector('#ttt-result-sub');
+
+  function fitBoardToStage() {
+    const rect = stageBox.getBoundingClientRect();
+    const availW = Math.max(200, (rect.width || window.innerWidth) - 8);
+    const availH = Math.max(200, (rect.height || window.innerHeight - 170) - 8);
+    const side = Math.max(190, Math.min(356, availW, availH));
+    boardEl.style.width = `${side}px`;
+    boardEl.style.height = `${side}px`;
+  }
+
+  const resizeObserver =
+    typeof ResizeObserver !== 'undefined' ? new ResizeObserver(() => fitBoardToStage()) : null;
+  resizeObserver?.observe(stageBox);
 
   const cellBtns = [];
   for (let i = 0; i < 9; i++) {
@@ -216,15 +230,14 @@ export function createTicTacToeGame(ctx) {
     tabInfinite.classList.toggle('active', variant === 'infinite');
     tabClassic.classList.toggle('active', variant === 'classic');
 
-    // In online P2P, only Host switches rule variant to avoid simultaneous conflict
     const canSwitchVariant = mode !== 'online' || isHost;
     tabInfinite.disabled = !canSwitchVariant;
     tabClassic.disabled = !canSwitchVariant;
 
     ruleNoteEl.textContent =
       variant === 'infinite'
-        ? 'Máximo 3 marcas por jugador: al colocar la 4.ª, tu marca más antigua desaparece.'
-        : 'Modo tradicional 3×3: alinea tres marcas iguales antes de llenar el tablero.';
+        ? 'Máximo 3 marcas: al colocar la 4.ª se borra tu marca más antigua.'
+        : 'Modo tradicional 3×3: alinea tres marcas iguales.';
   }
 
   function updateHud() {
@@ -441,10 +454,12 @@ export function createTicTacToeGame(ctx) {
     }
   }
   window.addEventListener('keydown', onKeyDown);
+  window.addEventListener('resize', fitBoardToStage);
 
   updateVariantUi();
   renderBoard();
   updateHud();
+  requestAnimationFrame(() => fitBoardToStage());
 
   return {
     onNetMessage(msg) {
@@ -467,7 +482,9 @@ export function createTicTacToeGame(ctx) {
 
     destroy() {
       clearTimeout(aiTimer);
+      resizeObserver?.disconnect();
       window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('resize', fitBoardToStage);
     }
   };
 }

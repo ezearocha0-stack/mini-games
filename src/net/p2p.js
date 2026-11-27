@@ -51,11 +51,20 @@ export class P2PSession {
     this.transport = null; // 'ws' | 'webrtc' | null
     this.ws = null;
     this.wsPaired = false;
+
+    // Optional direct UDP WebRTC fast-lane negotiated over /ws
+    this.rtcPc = null;
+    this.fastDc = null;
+    this.pendingIceCandidates = [];
+
+    // PeerJS fallback (for pure static hosting like Vercel)
     this.peer = null;
     this.conn = null;
+    this.fastPeerConn = null;
+
     this.role = null; // 'host' | 'guest' | null
     this.roomCode = null;
-    this.status = 'idle'; // 'idle' | 'creating' | 'waiting' | 'joining' | 'connected' | 'disconnected' | 'error'
+    this.status = 'idle';
     this.remoteProfile = null;
     this.rttMs = null;
     this.pingTimer = null;
@@ -64,9 +73,18 @@ export class P2PSession {
 
   isConnected() {
     if (this.transport === 'ws') {
-      return Boolean(this.ws && this.ws.readyState === WebSocket.OPEN && this.wsPaired && this.status === 'connected');
+      return Boolean(
+        this.ws &&
+          this.ws.readyState === WebSocket.OPEN &&
+          this.wsPaired &&
+          this.status === 'connected'
+      );
     }
     return Boolean(this.conn && this.conn.open && this.status === 'connected');
+  }
+
+  hasDirectUdpFastLane() {
+    return Boolean(this.fastDc && this.fastDc.readyState === 'open');
   }
 
   isHost() {
@@ -82,7 +100,7 @@ export class P2PSession {
       roomCode: this.roomCode,
       remoteProfile: this.remoteProfile,
       rttMs: this.rttMs,
-      transport: this.transport
+      transport: this.hasDirectUdpFastLane() ? 'udp-direct' : this.transport
     });
   }
 
@@ -94,12 +112,10 @@ export class P2PSession {
     this.rttMs = null;
     this.setStatus('creating', 'Creando sala…');
 
-    // 1. Try built-in Render / Node WebSocket server first (/ws)
     try {
       const code = await this.createRoomViaWebSocket(this.roomCode);
       return code;
     } catch {
-      // 2. Fallback to serverless WebRTC P2P (for static hosts like Vercel)
       return this.createRoomViaPeerJs(this.roomCode);
     }
   }
@@ -117,7 +133,6 @@ export class P2PSession {
     this.rttMs = null;
     this.setStatus('joining', `Conectando a ${code}…`);
 
-    // 1. Try built-in Render / Node WebSocket server first (/ws)
     try {
       const joinedCode = await this.joinRoomViaWebSocket(code);
       return joinedCode;
@@ -126,13 +141,139 @@ export class P2PSession {
         this.setStatus('error', wsErr.message);
         throw wsErr;
       }
-      // 2. Fallback to serverless WebRTC P2P (for static hosts like Vercel)
       return this.joinRoomViaPeerJs(code);
     }
   }
 
   // =========================================================================
-  // Transport A: Render / Node WebSocket (/ws)
+  // Direct WebRTC UDP Fast-Lane Upgrade (signaled over /ws)
+  // Eliminates server geography RTT & TCP head-of-line blocking when possible
+  // =========================================================================
+  closeRtcFastLane() {
+    this.pendingIceCandidates = [];
+    if (this.fastDc) {
+      try {
+        this.fastDc.close();
+      } catch {}
+      this.fastDc = null;
+    }
+    if (this.rtcPc) {
+      try {
+        this.rtcPc.close();
+      } catch {}
+      this.rtcPc = null;
+    }
+  }
+
+  setupRtcPeerConnection(isInitiator) {
+    if (typeof RTCPeerConnection === 'undefined') return null;
+    this.closeRtcFastLane();
+
+    const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
+    this.rtcPc = pc;
+
+    pc.onicecandidate = (ev) => {
+      if (ev.candidate && this.ws && this.ws.readyState === WebSocket.OPEN) {
+        this.ws.send(
+          JSON.stringify({
+            sys: 'RTC_SIGNAL',
+            signal: { type: 'ice', candidate: ev.candidate }
+          })
+        );
+      }
+    };
+
+    const bindFastChannel = (dc) => {
+      this.fastDc = dc;
+      dc.onopen = () => {
+        // Re-trigger immediate ping over UDP fast-lane so UI reflects ultra-low ms
+        this.sendFast({ type: 'PING', ts: performance.now() });
+        this.onPingUpdate?.(this.rttMs);
+      };
+      dc.onmessage = (ev) => {
+        try {
+          const packet = JSON.parse(ev.data);
+          this.handleIncomingAppPacket(packet);
+        } catch {}
+      };
+      dc.onclose = () => {
+        if (this.fastDc === dc) this.fastDc = null;
+      };
+    };
+
+    if (isInitiator) {
+      const dc = pc.createDataChannel('fast', {
+        ordered: false,
+        maxRetransmits: 0
+      });
+      bindFastChannel(dc);
+
+      pc.createOffer()
+        .then((offer) => pc.setLocalDescription(offer))
+        .then(() => {
+          if (this.ws && this.ws.readyState === WebSocket.OPEN && pc.localDescription) {
+            this.ws.send(
+              JSON.stringify({
+                sys: 'RTC_SIGNAL',
+                signal: { type: 'sdp', sdp: pc.localDescription }
+              })
+            );
+          }
+        })
+        .catch(() => {});
+    } else {
+      pc.ondatachannel = (ev) => {
+        if (ev.channel.label === 'fast') {
+          bindFastChannel(ev.channel);
+        }
+      };
+    }
+
+    return pc;
+  }
+
+  async handleRtcSignal(signal) {
+    if (!signal || typeof RTCPeerConnection === 'undefined') return;
+    try {
+      if (signal.type === 'sdp' && signal.sdp) {
+        let pc = this.rtcPc;
+        if (!pc && signal.sdp.type === 'offer') {
+          pc = this.setupRtcPeerConnection(false);
+        }
+        if (!pc) return;
+
+        await pc.setRemoteDescription(new RTCSessionDescription(signal.sdp));
+        while (this.pendingIceCandidates.length > 0) {
+          const cand = this.pendingIceCandidates.shift();
+          await pc.addIceCandidate(new RTCIceCandidate(cand)).catch(() => {});
+        }
+
+        if (signal.sdp.type === 'offer') {
+          const answer = await pc.createAnswer();
+          await pc.setLocalDescription(answer);
+          if (this.ws && this.ws.readyState === WebSocket.OPEN && pc.localDescription) {
+            this.ws.send(
+              JSON.stringify({
+                sys: 'RTC_SIGNAL',
+                signal: { type: 'sdp', sdp: pc.localDescription }
+              })
+            );
+          }
+        }
+      } else if (signal.type === 'ice' && signal.candidate) {
+        if (this.rtcPc && this.rtcPc.remoteDescription) {
+          await this.rtcPc.addIceCandidate(new RTCIceCandidate(signal.candidate)).catch(() => {});
+        } else {
+          this.pendingIceCandidates.push(signal.candidate);
+        }
+      }
+    } catch {
+      // If direct UDP fails due to strict firewall, /ws seamlessly keeps carrying traffic
+    }
+  }
+
+  // =========================================================================
+  // Transport A: Render / Node WebSocket (/ws) + Auto UDP Fast-Lane
   // =========================================================================
   createRoomViaWebSocket(preferredCode) {
     return new Promise((resolve, reject) => {
@@ -148,7 +289,9 @@ export class P2PSession {
       const probeTimeout = setTimeout(() => {
         if (!settled) {
           settled = true;
-          try { ws.close(); } catch {}
+          try {
+            ws.close();
+          } catch {}
           reject(new Error('WS_UNAVAILABLE'));
         }
       }, 2200);
@@ -183,12 +326,19 @@ export class P2PSession {
           this.wsPaired = true;
           this.setStatus('connected', 'Conectado en tiempo real');
           this.send({ type: 'HELLO', profile: this.getLocalProfile() });
+          this.setupRtcPeerConnection(true);
           this.startPingLoop();
+          return;
+        }
+
+        if (msg.sys === 'RTC_SIGNAL') {
+          this.handleRtcSignal(msg.signal);
           return;
         }
 
         if (msg.sys === 'GUEST_LEFT') {
           this.stopPingLoop();
+          this.closeRtcFastLane();
           this.wsPaired = false;
           this.remoteProfile = null;
           this.rttMs = null;
@@ -219,6 +369,7 @@ export class P2PSession {
         }
         if (this.transport === 'ws' && this.ws === ws) {
           this.stopPingLoop();
+          this.closeRtcFastLane();
           this.wsPaired = false;
           this.setStatus('disconnected', 'Se cerró la conexión con el servidor.');
         }
@@ -240,7 +391,9 @@ export class P2PSession {
       const probeTimeout = setTimeout(() => {
         if (!settled) {
           settled = true;
-          try { ws.close(); } catch {}
+          try {
+            ws.close();
+          } catch {}
           reject(new Error('WS_UNAVAILABLE'));
         }
       }, 2200);
@@ -261,7 +414,9 @@ export class P2PSession {
           clearTimeout(probeTimeout);
           const err = new Error(msg.message || `No se pudo entrar a la sala ${code}.`);
           err.isRoomLogicError = true;
-          try { ws.close(); } catch {}
+          try {
+            ws.close();
+          } catch {}
           if (!settled) {
             settled = true;
             reject(err);
@@ -285,8 +440,14 @@ export class P2PSession {
           return;
         }
 
+        if (msg.sys === 'RTC_SIGNAL') {
+          this.handleRtcSignal(msg.signal);
+          return;
+        }
+
         if (msg.sys === 'HOST_LEFT' || msg.sys === 'PEER_CLOSED') {
           this.stopPingLoop();
+          this.closeRtcFastLane();
           this.wsPaired = false;
           this.rttMs = null;
           this.setStatus('disconnected', 'El anfitrión cerró la sala.');
@@ -316,6 +477,7 @@ export class P2PSession {
         }
         if (this.transport === 'ws' && this.ws === ws && this.wsPaired) {
           this.stopPingLoop();
+          this.closeRtcFastLane();
           this.wsPaired = false;
           this.setStatus('disconnected', 'La conexión se cerró.');
           this.onMessage?.({ type: 'PEER_LEFT' });
@@ -350,6 +512,11 @@ export class P2PSession {
       });
 
       peer.on('connection', (incomingConn) => {
+        if (incomingConn.label === 'fast-unreliable') {
+          this.fastPeerConn = incomingConn;
+          incomingConn.on('data', (pkt) => this.handleIncomingAppPacket(pkt));
+          return;
+        }
         if (this.conn && this.conn.open) {
           incomingConn.on('open', () => {
             incomingConn.send({ type: 'ROOM_FULL' });
@@ -411,6 +578,15 @@ export class P2PSession {
           reliable: true,
           serialization: 'json'
         });
+        // Also open an unordered UDP channel for fast snapshots
+        const fastConn = peer.connect(targetId, {
+          label: 'fast-unreliable',
+          reliable: false,
+          serialization: 'json'
+        });
+        this.fastPeerConn = fastConn;
+        fastConn.on('data', (pkt) => this.handleIncomingAppPacket(pkt));
+
         this.bindPeerConnection(conn, () => {
           if (!settled) {
             settled = true;
@@ -452,6 +628,7 @@ export class P2PSession {
     conn.on('close', () => {
       this.stopPingLoop();
       this.conn = null;
+      this.fastPeerConn = null;
       this.rttMs = null;
       if (this.role === 'host' && this.peer && !this.peer.destroyed) {
         this.remoteProfile = null;
@@ -469,7 +646,7 @@ export class P2PSession {
   }
 
   // =========================================================================
-  // Shared Packet Processing & Sending
+  // Shared Packet Processing & Dual-Channel Sending (Reliable vs Fast/Volatile)
   // =========================================================================
   handleIncomingAppPacket(packet) {
     if (!packet || typeof packet !== 'object') return;
@@ -491,7 +668,7 @@ export class P2PSession {
     }
 
     if (packet.type === 'PING') {
-      this.send({ type: 'PONG', ts: packet.ts });
+      this.sendFast({ type: 'PONG', ts: packet.ts });
       return;
     }
 
@@ -504,6 +681,7 @@ export class P2PSession {
     this.onMessage?.(packet);
   }
 
+  // Reliable ordered send (goals, turn moves, room state, strike impulses)
   send(payload) {
     if (this.transport === 'ws') {
       if (this.ws && this.ws.readyState === WebSocket.OPEN && this.wsPaired) {
@@ -528,6 +706,52 @@ export class P2PSession {
     return false;
   }
 
+  // Unordered / zero-backpressure send for 60Hz coordinates & physics snapshots
+  sendFast(payload) {
+    // 1. Direct UDP WebRTC DataChannel (zero head-of-line blocking, lowest ms!)
+    if (this.fastDc && this.fastDc.readyState === 'open') {
+      if (this.fastDc.bufferedAmount < 4096) {
+        try {
+          this.fastDc.send(JSON.stringify(payload));
+          return true;
+        } catch {}
+      } else {
+        return false; // Drop frame rather than queue
+      }
+    }
+
+    // 2. PeerJS unreliable DataChannel (on static Vercel)
+    if (this.fastPeerConn && this.fastPeerConn.open) {
+      const dc = this.fastPeerConn.dataChannel;
+      if (!dc || dc.bufferedAmount < 4096) {
+        try {
+          this.fastPeerConn.send(payload);
+          return true;
+        } catch {}
+      } else {
+        return false;
+      }
+    }
+
+    // 3. WebSocket volatile relay (skip if client socket has pending unacked bytes!)
+    if (this.transport === 'ws') {
+      if (this.ws && this.ws.readyState === WebSocket.OPEN && this.wsPaired) {
+        if (this.ws.bufferedAmount > 2048) {
+          return false; // Drop stale frame so latency never builds up
+        }
+        try {
+          this.ws.send(JSON.stringify({ sys: 'VOLATILE', payload }));
+          return true;
+        } catch {
+          return false;
+        }
+      }
+      return false;
+    }
+
+    return this.send(payload);
+  }
+
   broadcastProfileUpdate() {
     if (this.isConnected()) {
       this.send({
@@ -541,11 +765,11 @@ export class P2PSession {
     this.stopPingLoop();
     const firePing = () => {
       if (this.isConnected()) {
-        this.send({ type: 'PING', ts: performance.now() });
+        this.sendFast({ type: 'PING', ts: performance.now() });
       }
     };
     firePing();
-    this.pingTimer = setInterval(firePing, 2500);
+    this.pingTimer = setInterval(firePing, 2000);
   }
 
   stopPingLoop() {
@@ -557,12 +781,19 @@ export class P2PSession {
 
   cleanupTransports() {
     this.stopPingLoop();
+    this.closeRtcFastLane();
     this.wsPaired = false;
     if (this.ws) {
       try {
         this.ws.close();
       } catch {}
       this.ws = null;
+    }
+    if (this.fastPeerConn) {
+      try {
+        this.fastPeerConn.close();
+      } catch {}
+      this.fastPeerConn = null;
     }
     if (this.conn) {
       try {
