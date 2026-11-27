@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: mini-games
+    runtime: node
+    region: oregon
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    healthCheckPath: /healthz
+    envVars:
+      - key: NODE_ENV
+        value: production
