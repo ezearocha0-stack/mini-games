@@ -1,3 +1,6 @@
+import { loadEnvFiles } from './server/env.js';
+loadEnvFiles();
+
 import { defineConfig } from 'vite';
 import { attachRoomWebSocketServer } from './server/wsRooms.js';
 import { handleApiRequest } from './server/api.js';
@@ -36,6 +39,7 @@ export default defineConfig({
       output: {
         manualChunks: {
           'net-vendor': ['peerjs', 'qrcode'],
+          'auth-vendor': ['@supabase/supabase-js'],
           'games-pack': [
             './src/games/eightBall.js',
             './src/games/miniGolf.js',

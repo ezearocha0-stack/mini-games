@@ -64,7 +64,7 @@ npm run dev
 Consulta [`.env.example`](.env.example) para configurar opcionalmente:
 - **Base de datos local autónoma**: Funciona de serie con `node:sqlite` (`.data/minigames.sqlite`) sin coste ni configuración externa.
 - **Supabase (`SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`)**: Incluye migración completa SQL + Row Level Security en [`supabase/migrations/001_initial_schema.sql`](supabase/migrations/001_initial_schema.sql).
-- **Correo OTP (`RESEND_API_KEY`, `SMTP_FROM`)**: Sin clave configurada, los OTP se muestran en el log del servidor (y en modo desarrollo para pruebas).
+- **Correo OTP (`RESEND_API_KEY` + `SMTP_FROM`, `SMTP_*` o Supabase Custom SMTP)**: Consulta [`AUTH_OTP_SETUP.md`](AUTH_OTP_SETUP.md) para configurar el envío real hacia cualquier correo externo con Resend, plantilla `{{ .Token }}` y verificación mediante `npm.cmd run check:email -- correo@ejemplo.com`. Sin proveedor configurado, la plataforma advierte explícitamente que no se envió correo en lugar de simularlo.
 - **Google OAuth (`GOOGLE_CLIENT_ID`)**: Verificación de ID Tokens de Google cuando esté configurado.
 - **TURN WebRTC (`TURN_URLS`, `TURN_SHARED_SECRET` o credenciales)**: Servidos de forma segura vía `/api/rtc/ice` sin exponer secretos en el frontend.
 

@@ -98,6 +98,8 @@ export function getDb() {
       attempts INTEGER NOT NULL DEFAULT 0,
       expires_at INTEGER NOT NULL,
       used INTEGER NOT NULL DEFAULT 0,
+      delivery_status TEXT NOT NULL DEFAULT 'pending',
+      provider_error TEXT NOT NULL DEFAULT '',
       created_at INTEGER NOT NULL
     );
 
@@ -236,6 +238,14 @@ export function getDb() {
   const userCols = db.prepare('PRAGMA table_info(users)').all().map((c) => c.name);
   if (!userCols.includes('elo_by_game')) {
     db.exec("ALTER TABLE users ADD COLUMN elo_by_game TEXT NOT NULL DEFAULT '{}'");
+  }
+
+  const otpCols = db.prepare('PRAGMA table_info(otp_codes)').all().map((c) => c.name);
+  if (!otpCols.includes('delivery_status')) {
+    db.exec("ALTER TABLE otp_codes ADD COLUMN delivery_status TEXT NOT NULL DEFAULT 'pending'");
+  }
+  if (!otpCols.includes('provider_error')) {
+    db.exec("ALTER TABLE otp_codes ADD COLUMN provider_error TEXT NOT NULL DEFAULT ''");
   }
 
   const insertAch = db.prepare(

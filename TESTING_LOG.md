@@ -1,9 +1,16 @@
-# Registro de Pruebas — Mini-Games (`v2.1.0`)
+# Registro de Pruebas — Mini-Games (`v2.1.1`)
 
 Leyenda de estado:
 - `[PASS]` Probado directamente en esta sesión y verificado sin errores.
 - `[PARTIAL]` Probado mediante emulación / pruebas automatizadas locales (pendiente de prueba física en dos dispositivos reales en redes separadas).
 - `[BLOCKED-EXT]` Requiere credenciales externas o hardware del propietario no presentes en el entorno (`GOOGLE_CLIENT_ID`, `RESEND_API_KEY`, `SUPABASE_URL`, servidor `TURN` real, o micrófono físico).
+
+## Comprobaciones de Autenticación y Envío OTP (`v2.1.1`)
+- `[PASS]` `npm.cmd test` (`tests/platform.test.mjs`): **8/8 pruebas aprobadas** (`fail 0`, `skipped 0`, `1241.8 ms`):
+  - Estados OTP reales verificados: `unconfigured` (`503 EMAIL_PROVIDER_NOT_CONFIGURED`), `rejected` ante respuesta HTTP `403` estilo Resend (`502 EMAIL_DELIVERY_REJECTED`), `sent` ante respuesta HTTP `200` de Resend capturando el OTP real de 6 dígitos del payload saliente, enfriamiento `429 OTP_COOLDOWN` (`60 s`), rechazo por correo distinto al registrado, caducidad de código (>10 min) y verificación exitosa.
+  - Flujo completo `@supabase/supabase-js` verificado (`signUp` → `resend({ type: 'signup' })` → `verifyOtp({ type: 'signup' })` → `/api/auth/supabase-exchange`).
+- `[PASS]` Verificación en navegador (`1280×800`, servidor sin credenciales externas): confirmado aviso previo en registro, transición a `verify_otp` mostrando cuenta en estado `pendiente de verificación` y error `EMAIL_PROVIDER_NOT_CONFIGURED` sin fingir envío, campo `#auth-otp-email` bloqueado (`readonly`) al correo normalizado, botón `Cambiar correo` y reenvío honesto con `0` errores JS en consola.
+- `[BLOCKED-EXT]` **Aceptación real de Resend / Supabase hacia bandeja externa (`gmail`/`outlook`)**: No existen `.env` ni claves `RESEND_API_KEY` / `SUPABASE_URL` del propietario en este entorno (`npm.cmd run check:email` reporta proveedor `none`), por lo que el envío real de un correo hacia Internet queda pendiente de que el propietario cargue sus credenciales siguiendo `AUTH_OTP_SETUP.md`.
 
 ## Comprobaciones de Ingeniería Ejecutadas tras Última Edición
 - `[PASS]` `git diff --stat src/games/airHockey.js src/games/connectFour.js src/games/ticTacToe.js`: salida vacía (`0` modificaciones sobre los 3 juegos originales).

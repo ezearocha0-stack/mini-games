@@ -1,0 +1,37 @@
+# Configuración de Supabase Auth para OTP de 6 dígitos y Custom SMTP (Resend)
+# Si usas Supabase Dashboard alojado, copia el contenido de supabase/templates/*.html
+# en Authentication -> Email Templates y configura Authentication -> SMTP Settings.
+
+project_id = "mini-games"
+
+[auth]
+enable_signup = true
+minimum_password_length = 8
+
+[auth.email]
+enable_signup = true
+enable_confirmations = true
+otp_length = 6
+otp_expiry = 600
+max_frequency = "60s"
+
+[auth.email.smtp]
+enabled = true
+host = "smtp.resend.com"
+port = 465
+user = "resend"
+pass = "env(RESEND_API_KEY)"
+sender_name = "Mini-Games"
+admin_email = "env(SMTP_FROM)"
+
+[auth.email.template.confirmation]
+subject = "Tu código de verificación Mini-Games ({{ .Token }})"
+content_path = "./supabase/templates/confirm_signup.html"
+
+[auth.email.template.magic_link]
+subject = "Tu código de acceso Mini-Games ({{ .Token }})"
+content_path = "./supabase/templates/magic_link.html"
+
+[auth.email.template.recovery]
+subject = "Código de recuperación Mini-Games ({{ .Token }})"
+content_path = "./supabase/templates/recovery.html"

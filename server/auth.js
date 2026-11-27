@@ -9,9 +9,17 @@ import {
   isValidEmail,
   sanitizeUsername
 } from './security.js';
+import { deliverOtpEmail } from './mailer.js';
 
-const OTP_TTL_MS = 10 * 60 * 1000;
+export const OTP_TTL_MS = 10 * 60 * 1000; // 10 minutos
+export const OTP_RESEND_COOLDOWN_MS = 60 * 1000; // 60 segundos entre envíos exitosos
+export const OTP_WINDOW_15M_MAX = 5;
+export const OTP_MAX_ATTEMPTS = 5;
 const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+
+function makeHttpError(status, message, code, extra = {}) {
+  return Object.assign(new Error(message), { status, code, extra });
+}
 
 function generatePublicId(db) {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -31,32 +39,6 @@ function generateTag(db) {
     if (!exists) return tag;
   }
   return crypto.randomBytes(2).toString('hex').toUpperCase();
-}
-
-async function deliverOtpEmail(email, code, purpose) {
-  const resendKey = process.env.RESEND_API_KEY;
-  const from = process.env.SMTP_FROM || 'Mini-Games <no-reply@example.com>';
-  if (resendKey) {
-    try {
-      const resp = await fetch('https://api.resend.com/emails', {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${resendKey}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          from,
-          to: [email],
-          subject: `Tu código de verificación Mini-Games: ${code}`,
-          text: `Tu código OTP (${purpose}) de 6 dígitos es: ${code}. Caduca en 10 minutos.`
-        })
-      });
-      if (resp.ok) return { delivered: 'email' };
-    } catch {}
-  }
-
-  console.log(`[Mini-Games OTP] email=${email} purpose=${purpose} code=${code}`);
-  return { delivered: 'server_log' };
 }
 
 export function createSessionForUser(db, userId, deviceLabel = 'Navegador') {
@@ -155,39 +137,153 @@ function insertSettingsFromGuest(db, userId, guestSettings = {}) {
   );
 }
 
-export async function issueOtp(db, email, purpose) {
+export function getActiveOtpCooldown(db, email, purpose) {
+  const cleanEmail = String(email || '').trim().toLowerCase();
+  const now = Date.now();
+  const latestSent = db
+    .prepare(
+      `SELECT created_at, expires_at FROM otp_codes
+       WHERE email = ? AND purpose = ? AND delivery_status IN ('sent', 'console_test')
+       ORDER BY created_at DESC LIMIT 1`
+    )
+    .get(cleanEmail, purpose);
+
+  if (latestSent) {
+    const elapsed = now - latestSent.created_at;
+    if (elapsed < OTP_RESEND_COOLDOWN_MS) {
+      return {
+        inCooldown: true,
+        retryAfterSec: Math.max(1, Math.ceil((OTP_RESEND_COOLDOWN_MS - elapsed) / 1000)),
+        expiresInSec: Math.max(0, Math.floor((latestSent.expires_at - now) / 1000))
+      };
+    }
+  }
+  return { inCooldown: false, retryAfterSec: 0, expiresInSec: 0 };
+}
+
+export async function issueOtp(db, email, purpose, { enforceCooldown = true } = {}) {
+  const cleanEmail = String(email || '').trim().toLowerCase();
+  const now = Date.now();
+
+  if (enforceCooldown) {
+    const cd = getActiveOtpCooldown(db, cleanEmail, purpose);
+    if (cd.inCooldown) {
+      throw makeHttpError(
+        429,
+        `Espera ${cd.retryAfterSec} segundos antes de solicitar otro código para ${cleanEmail}.`,
+        'OTP_COOLDOWN',
+        { retryAfterSec: cd.retryAfterSec, email: cleanEmail }
+      );
+    }
+
+    const recentSentCount = db
+      .prepare(
+        `SELECT COUNT(*) AS cnt FROM otp_codes
+         WHERE email = ? AND created_at > ? AND delivery_status IN ('sent', 'console_test')`
+      )
+      .get(cleanEmail, now - 15 * 60 * 1000).cnt;
+    if (recentSentCount >= OTP_WINDOW_15M_MAX) {
+      throw makeHttpError(
+        429,
+        'Has superado el límite de 5 solicitudes de código en 15 minutos. Intenta más tarde.',
+        'OTP_RATE_LIMIT',
+        { retryAfterSec: 120, email: cleanEmail }
+      );
+    }
+  }
+
   const code = generateOtp6();
   const id = 'otp_' + crypto.randomUUID().replace(/-/g, '').slice(0, 14);
-  const now = Date.now();
-  db.prepare('UPDATE otp_codes SET used = 1 WHERE email = ? AND purpose = ? AND used = 0').run(email, purpose);
-  db.prepare(
-    'INSERT INTO otp_codes (id, email, purpose, code_hash, attempts, expires_at, used, created_at) VALUES (?, ?, ?, ?, 0, ?, 0, ?)'
-  ).run(id, email, purpose, sha256Hex(code), now + OTP_TTL_MS, now);
+  const expiresAt = now + OTP_TTL_MS;
 
-  const delivery = await deliverOtpEmail(email, code, purpose);
-  const devOtpHint = process.env.NODE_ENV !== 'production' ? code : undefined;
-  return { delivery: delivery.delivered, devOtpHint };
+  db.prepare('UPDATE otp_codes SET used = 1 WHERE email = ? AND purpose = ? AND used = 0').run(
+    cleanEmail,
+    purpose
+  );
+  db.prepare(
+    `INSERT INTO otp_codes (
+      id, email, purpose, code_hash, attempts, expires_at, used, delivery_status, provider_error, created_at
+    ) VALUES (?, ?, ?, ?, 0, ?, 0, 'pending', '', ?)`
+  ).run(id, cleanEmail, purpose, sha256Hex(code), expiresAt, now);
+
+  const delivery = await deliverOtpEmail({ email: cleanEmail, code, purpose });
+  const providerError = delivery.errorMessage || '';
+
+  db.prepare('UPDATE otp_codes SET delivery_status = ?, provider_error = ? WHERE id = ?').run(
+    delivery.status,
+    providerError.slice(0, 300),
+    id
+  );
+
+  // If rejected or unconfigured, mark OTP code invalid so user cannot verify a dead unsent code
+  if (delivery.status === 'rejected' || delivery.status === 'unconfigured') {
+    db.prepare('UPDATE otp_codes SET used = 1 WHERE id = ?').run(id);
+  }
+
+  const devOtpHint = delivery.status === 'console_test' ? code : undefined;
+  return {
+    email: cleanEmail,
+    deliveryStatus: delivery.status,
+    provider: delivery.provider,
+    messageId: delivery.messageId,
+    errorCode: delivery.errorCode,
+    providerError: providerError || undefined,
+    expiresAt,
+    expiresInSec: Math.round(OTP_TTL_MS / 1000),
+    cooldownSec: delivery.status === 'sent' || delivery.status === 'console_test' ? 60 : 0,
+    devOtpHint
+  };
 }
 
 export function verifyOtpConsume(db, email, purpose, code) {
+  const cleanEmail = String(email || '').trim().toLowerCase();
+  const cleanCode = String(code || '').trim();
+  if (!/^\d{6}$/.test(cleanCode)) {
+    return { ok: false, message: 'El código OTP debe tener exactamente 6 dígitos numéricos.' };
+  }
+
   const row = db
     .prepare(
       'SELECT * FROM otp_codes WHERE email = ? AND purpose = ? AND used = 0 ORDER BY created_at DESC LIMIT 1'
     )
-    .get(email, purpose);
-  if (!row) return { ok: false, message: 'No hay código pendiente para ese correo.' };
-  if (row.expires_at < Date.now()) {
-    db.prepare('UPDATE otp_codes SET used = 1 WHERE id = ?').run(row.id);
-    return { ok: false, message: 'El código OTP expiró. Solicita uno nuevo.' };
-  }
-  if (row.attempts >= 5) {
-    db.prepare('UPDATE otp_codes SET used = 1 WHERE id = ?').run(row.id);
-    return { ok: false, message: 'Demasiados intentos. Solicita un código nuevo.' };
+    .get(cleanEmail, purpose);
+
+  if (!row) {
+    const lastRow = db
+      .prepare('SELECT delivery_status, expires_at, used FROM otp_codes WHERE email = ? AND purpose = ? ORDER BY created_at DESC LIMIT 1')
+      .get(cleanEmail, purpose);
+    if (lastRow && (lastRow.delivery_status === 'rejected' || lastRow.delivery_status === 'unconfigured')) {
+      return {
+        ok: false,
+        message: 'El envío de correo anterior falló y no hay ningún código válido. Pulsa Reenviar código cuando el correo esté configurado.'
+      };
+    }
+    if (lastRow && lastRow.expires_at < Date.now()) {
+      return { ok: false, message: 'El código OTP expiró (10 min). Pulsa Reenviar código.' };
+    }
+    return { ok: false, message: 'No hay código pendiente para ese correo. Solicita uno nuevo.' };
   }
 
-  if (sha256Hex(String(code).trim()) !== row.code_hash) {
-    db.prepare('UPDATE otp_codes SET attempts = attempts + 1 WHERE id = ?').run(row.id);
-    return { ok: false, message: 'Código OTP incorrecto.' };
+  if (row.expires_at < Date.now()) {
+    db.prepare('UPDATE otp_codes SET used = 1 WHERE id = ?').run(row.id);
+    return { ok: false, message: 'El código OTP expiró tras 10 minutos. Solicita uno nuevo.' };
+  }
+  if (row.attempts >= OTP_MAX_ATTEMPTS) {
+    db.prepare('UPDATE otp_codes SET used = 1 WHERE id = ?').run(row.id);
+    return { ok: false, message: 'Demasiados intentos fallidos. Solicita un código nuevo.' };
+  }
+
+  if (sha256Hex(cleanCode) !== row.code_hash) {
+    const nextAttempts = row.attempts + 1;
+    db.prepare('UPDATE otp_codes SET attempts = ? WHERE id = ?').run(nextAttempts, row.id);
+    if (nextAttempts >= OTP_MAX_ATTEMPTS) {
+      db.prepare('UPDATE otp_codes SET used = 1 WHERE id = ?').run(row.id);
+      return { ok: false, message: 'Has agotado los 5 intentos permitidos. Solicita un código nuevo.' };
+    }
+    return {
+      ok: false,
+      message: `Código OTP incorrecto. Te quedan ${OTP_MAX_ATTEMPTS - nextAttempts} intento(s).`
+    };
   }
 
   db.prepare('UPDATE otp_codes SET used = 1 WHERE id = ?').run(row.id);
@@ -197,26 +293,19 @@ export function verifyOtpConsume(db, email, purpose, code) {
 export async function registerUser({ email, password, username, guestMigration }) {
   const cleanEmail = String(email || '').trim().toLowerCase();
   if (!isValidEmail(cleanEmail)) {
-    throw Object.assign(new Error('Correo electrónico inválido.'), { status: 400 });
+    throw makeHttpError(400, 'Correo electrónico inválido.', 'INVALID_EMAIL');
   }
   if (!password || String(password).length < 8) {
-    throw Object.assign(new Error('La contraseña debe tener al menos 8 caracteres.'), { status: 400 });
+    throw makeHttpError(400, 'La contraseña debe tener al menos 8 caracteres.', 'WEAK_PASSWORD');
   }
 
   const db = getDb();
   const existing = db.prepare('SELECT id, email_verified FROM users WHERE email = ?').get(cleanEmail);
   if (existing && existing.email_verified) {
-    throw Object.assign(new Error('Ya existe una cuenta verificada con este correo.'), { status: 409 });
+    throw makeHttpError(409, 'Ya existe una cuenta verificada con este correo.', 'EMAIL_ALREADY_EXISTS');
   }
 
   const guestId = guestMigration?.guestId ? String(guestMigration.guestId).slice(0, 48) : null;
-  if (guestId && !existing) {
-    const dupGuest = db.prepare('SELECT id FROM users WHERE migrated_from_guest_id = ?').get(guestId);
-    if (dupGuest) {
-      // Idempotent guard: clear old guest reference only if creating an unrelated account? No, keep unique so guest doesn't duplicate!
-    }
-  }
-
   const cleanName = sanitizeUsername(username || guestMigration?.name) || 'Jugador';
   const avatarColor = /^#[0-9a-fA-F]{3,8}$/.test(guestMigration?.avatarColor || '')
     ? guestMigration.avatarColor
@@ -265,31 +354,155 @@ export async function registerUser({ email, password, username, guestMigration }
   }
 
   const otpInfo = await issueOtp(db, cleanEmail, 'verify_email');
+
+  if (otpInfo.deliveryStatus === 'rejected') {
+    throw makeHttpError(
+      502,
+      otpInfo.providerError || 'El proveedor de correo rechazó el envío del código OTP.',
+      'EMAIL_DELIVERY_REJECTED',
+      {
+        accountStatus: 'pending_verification',
+        deliveryStatus: 'rejected',
+        email: cleanEmail,
+        provider: otpInfo.provider,
+        providerError: otpInfo.providerError
+      }
+    );
+  }
+
+  if (otpInfo.deliveryStatus === 'unconfigured') {
+    throw makeHttpError(
+      503,
+      otpInfo.providerError || 'No hay proveedor de correo configurado para enviar el código OTP.',
+      'EMAIL_PROVIDER_NOT_CONFIGURED',
+      {
+        accountStatus: 'pending_verification',
+        deliveryStatus: 'unconfigured',
+        email: cleanEmail,
+        provider: 'none'
+      }
+    );
+  }
+
   return {
     ok: true,
-    email: cleanEmail,
-    message: 'Cuenta creada. Introduce el código OTP de 6 dígitos para verificar tu correo.',
+    accountStatus: 'pending_verification',
+    message:
+      otpInfo.deliveryStatus === 'sent'
+        ? `Código de verificación enviado a ${cleanEmail}.`
+        : 'Cuenta pendiente de verificación (modo pruebas locales).',
     ...otpInfo
+  };
+}
+
+export async function exchangeSupabaseSession({ accessToken, guestMigration, deviceLabel }) {
+  const supabaseUrl = String(process.env.SUPABASE_AUTH_BASE_URL || process.env.SUPABASE_URL || '')
+    .trim()
+    .replace(/\/$/, '');
+  const supabaseAnonKey = String(process.env.SUPABASE_ANON_KEY || '').trim();
+  if (!supabaseUrl || !supabaseAnonKey) {
+    throw makeHttpError(
+      501,
+      'Supabase Auth no está configurado en el servidor (SUPABASE_URL / SUPABASE_ANON_KEY).',
+      'SUPABASE_NOT_CONFIGURED'
+    );
+  }
+  const tokenStr = String(accessToken || '').trim();
+  if (!tokenStr) {
+    throw makeHttpError(400, 'Falta accessToken de Supabase.', 'MISSING_ACCESS_TOKEN');
+  }
+
+  const resp = await fetch(`${supabaseUrl}/auth/v1/user`, {
+    method: 'GET',
+    headers: {
+      apikey: supabaseAnonKey,
+      Authorization: `Bearer ${tokenStr}`
+    },
+    signal: AbortSignal.timeout(10_000)
+  });
+
+  if (!resp.ok) {
+    throw makeHttpError(401, 'La sesión de Supabase no es válida o expiró.', 'INVALID_SUPABASE_SESSION');
+  }
+
+  const sbUser = await resp.json();
+  const cleanEmail = String(sbUser?.email || '').trim().toLowerCase();
+  if (!isValidEmail(cleanEmail)) {
+    throw makeHttpError(401, 'El usuario de Supabase no contiene un correo válido.', 'INVALID_SUPABASE_USER');
+  }
+  const isConfirmed = Boolean(sbUser.email_confirmed_at || sbUser.confirmed_at);
+  if (!isConfirmed) {
+    throw makeHttpError(403, 'Debes verificar tu correo con el código OTP primero.', 'EMAIL_NOT_VERIFIED', {
+      accountStatus: 'pending_verification',
+      email: cleanEmail
+    });
+  }
+
+  const db = getDb();
+  const now = new Date().toISOString();
+  let user = db.prepare('SELECT * FROM users WHERE email = ?').get(cleanEmail);
+
+  if (!user) {
+    const userId = 'usr_' + crypto.randomUUID().replace(/-/g, '').slice(0, 16);
+    const metaName = sbUser.user_metadata?.username || guestMigration?.name;
+    const cleanName = sanitizeUsername(metaName || cleanEmail.split('@')[0]) || 'Jugador';
+    const guestId = guestMigration?.guestId ? String(guestMigration.guestId).slice(0, 48) : null;
+    const safeMigratedGuest =
+      guestId && !db.prepare('SELECT 1 FROM users WHERE migrated_from_guest_id = ?').get(guestId)
+        ? guestId
+        : null;
+
+    db.prepare(
+      `INSERT INTO users (
+        id, public_id, tag, email, email_verified, username,
+        avatar_color, avatar_icon, favorite_games, migrated_from_guest_id, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      userId,
+      generatePublicId(db),
+      generateTag(db),
+      cleanEmail,
+      cleanName,
+      sbUser.user_metadata?.avatar_color || guestMigration?.avatarColor || '#f58229',
+      sbUser.user_metadata?.avatar_icon || guestMigration?.avatarIcon || '⚡',
+      JSON.stringify(guestMigration?.favoriteGames || []),
+      safeMigratedGuest,
+      now,
+      now
+    );
+    insertSettingsFromGuest(db, userId, guestMigration?.settings || {});
+    user = db.prepare('SELECT * FROM users WHERE id = ?').get(userId);
+  } else if (!user.email_verified) {
+    db.prepare('UPDATE users SET email_verified = 1, updated_at = ? WHERE id = ?').run(now, user.id);
+    user = db.prepare('SELECT * FROM users WHERE id = ?').get(user.id);
+  }
+
+  const sess = createSessionForUser(db, user.id, deviceLabel);
+  return {
+    token: sess.rawToken,
+    user: toPrivateUser(user, db),
+    settings: getSettingsRow(db, user.id)
   };
 }
 
 export async function loginWithGoogle({ credential, guestMigration, deviceLabel }) {
   const clientId = process.env.GOOGLE_CLIENT_ID;
   if (!clientId) {
-    throw Object.assign(
-      new Error('Google OAuth no está configurado en el servidor (falta GOOGLE_CLIENT_ID).'),
-      { status: 501, code: 'PROVIDER_NOT_CONFIGURED' }
+    throw makeHttpError(
+      501,
+      'Google OAuth no está configurado en el servidor (falta GOOGLE_CLIENT_ID).',
+      'PROVIDER_NOT_CONFIGURED'
     );
   }
   const resp = await fetch(
     `https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(String(credential || ''))}`
   );
   if (!resp.ok) {
-    throw Object.assign(new Error('Token de Google inválido.'), { status: 401 });
+    throw makeHttpError(401, 'Token de Google inválido.', 'INVALID_GOOGLE_TOKEN');
   }
   const info = await resp.json();
   if (info.aud !== clientId || info.email_verified !== 'true' || !isValidEmail(info.email)) {
-    throw Object.assign(new Error('El token de Google no coincide con la aplicación.'), { status: 401 });
+    throw makeHttpError(401, 'El token de Google no coincide con la aplicación.', 'GOOGLE_MISMATCH');
   }
 
   const db = getDb();

@@ -15,9 +15,12 @@ import {
   clearSessionCookie,
   registerUser,
   issueOtp,
+  getActiveOtpCooldown,
   verifyOtpConsume,
+  exchangeSupabaseSession,
   loginWithGoogle
 } from './auth.js';
+import { getEmailProviderInfo } from './mailer.js';
 import {
   getClientIp,
   rateLimiter,
@@ -219,11 +222,17 @@ export async function handleApiRequest(req, res) {
   try {
     // Public capabilities & ICE configuration
     if (pathname === '/api/system/capabilities' && method === 'GET') {
+      const sbUrl = String(process.env.SUPABASE_URL || '').trim().replace(/\/$/, '');
+      const sbAnon = String(process.env.SUPABASE_ANON_KEY || '').trim();
+      const mailInfo = getEmailProviderInfo();
       return sendJson(res, 200, {
         sqliteReady: true,
-        supabaseConfigured: Boolean(process.env.SUPABASE_URL && process.env.SUPABASE_ANON_KEY),
+        supabaseConfigured: Boolean(sbUrl && sbAnon),
+        supabaseUrl: sbUrl && sbAnon ? sbUrl : '',
+        supabaseAnonKey: sbUrl && sbAnon ? sbAnon : '',
         googleOAuthEnabled: Boolean(process.env.GOOGLE_CLIENT_ID),
-        emailDeliveryMode: process.env.RESEND_API_KEY ? 'resend' : 'server_log',
+        emailDeliveryMode: mailInfo.provider,
+        emailProvider: mailInfo,
         turnConfigured: Boolean(process.env.TURN_URLS)
       });
     }
@@ -238,8 +247,8 @@ export async function handleApiRequest(req, res) {
 
     // AUTH ROUTES
     if (pathname === '/api/auth/register' && method === 'POST') {
-      if (!rateLimiter.allow(`auth:${ip}`, 10, 60_000)) {
-        return sendJson(res, 429, { message: 'Demasiados intentos. Espera un minuto.' });
+      if (!rateLimiter.allow(`auth:${ip}`, 12, 60_000)) {
+        return sendJson(res, 429, { message: 'Demasiados intentos. Espera un minuto.', code: 'RATE_LIMIT' });
       }
       const body = await readJsonBody(req);
       const out = await registerUser(body);
@@ -247,33 +256,87 @@ export async function handleApiRequest(req, res) {
     }
 
     if (pathname === '/api/auth/request-otp' && method === 'POST') {
-      if (!rateLimiter.allow(`otp:${ip}`, 8, 60_000)) {
-        return sendJson(res, 429, { message: 'Límite de envíos alcanzado. Espera un minuto.' });
+      if (!rateLimiter.allow(`otp:${ip}`, 10, 60_000)) {
+        return sendJson(res, 429, {
+          message: 'Límite de envíos por red alcanzado. Espera un minuto.',
+          code: 'OTP_RATE_LIMIT',
+          retryAfterSec: 60
+        });
       }
       const body = await readJsonBody(req);
       const email = String(body.email || '').trim().toLowerCase();
       const purpose = ['verify_email', 'login', 'reset_password'].includes(body.purpose)
         ? body.purpose
         : 'login';
-      if (!isValidEmail(email)) return sendJson(res, 400, { message: 'Correo inválido.' });
+      if (!isValidEmail(email)) return sendJson(res, 400, { message: 'Correo inválido.', code: 'INVALID_EMAIL' });
 
-      const user = db.prepare('SELECT id FROM users WHERE email = ?').get(email);
+      const user = db.prepare('SELECT id, email_verified FROM users WHERE email = ?').get(email);
       if (!user) {
-        return sendJson(res, 200, { ok: true, message: 'Si la cuenta existe, enviamos el código OTP.' });
+        if (purpose === 'verify_email') {
+          return sendJson(res, 404, {
+            message: 'No existe ningún registro pendiente con ese correo. Verifica que escribiste el mismo email.',
+            code: 'ACCOUNT_NOT_FOUND'
+          });
+        }
+        return sendJson(res, 200, {
+          ok: true,
+          deliveryStatus: 'accepted_if_exists',
+          cooldownSec: 60,
+          message: 'Si la cuenta existe, enviamos el código OTP.'
+        });
       }
+
+      if (purpose === 'verify_email' && user.email_verified) {
+        return sendJson(res, 409, {
+          message: 'Este correo ya está verificado. Ya puedes iniciar sesión.',
+          code: 'ALREADY_VERIFIED'
+        });
+      }
+
       const resOtp = await issueOtp(db, email, purpose);
-      return sendJson(res, 200, { ok: true, ...resOtp });
+      if (resOtp.deliveryStatus === 'rejected') {
+        return sendJson(res, 502, {
+          ok: false,
+          code: 'EMAIL_DELIVERY_REJECTED',
+          accountStatus: user.email_verified ? 'verified' : 'pending_verification',
+          deliveryStatus: 'rejected',
+          email,
+          provider: resOtp.provider,
+          providerError: resOtp.providerError,
+          message: resOtp.providerError || 'El proveedor rechazó el envío del correo.'
+        });
+      }
+      if (resOtp.deliveryStatus === 'unconfigured') {
+        return sendJson(res, 503, {
+          ok: false,
+          code: 'EMAIL_PROVIDER_NOT_CONFIGURED',
+          accountStatus: user.email_verified ? 'verified' : 'pending_verification',
+          deliveryStatus: 'unconfigured',
+          email,
+          provider: 'none',
+          message: resOtp.providerError || 'Proveedor de correo no configurado en el servidor.'
+        });
+      }
+      return sendJson(res, 200, {
+        ok: true,
+        accountStatus: user.email_verified ? 'verified' : 'pending_verification',
+        ...resOtp,
+        message:
+          resOtp.deliveryStatus === 'sent'
+            ? `Nuevo código enviado a ${email}.`
+            : 'Nuevo código generado (modo pruebas).'
+      });
     }
 
     if (pathname === '/api/auth/verify-otp' && method === 'POST') {
-      if (!rateLimiter.allow(`verify:${ip}`, 12, 60_000)) {
-        return sendJson(res, 429, { message: 'Demasiados intentos.' });
+      if (!rateLimiter.allow(`verify:${ip}`, 15, 60_000)) {
+        return sendJson(res, 429, { message: 'Demasiados intentos.', code: 'RATE_LIMIT' });
       }
       const body = await readJsonBody(req);
       const email = String(body.email || '').trim().toLowerCase();
       const purpose = ['verify_email', 'login'].includes(body.purpose) ? body.purpose : 'verify_email';
       const check = verifyOtpConsume(db, email, purpose, body.code);
-      if (!check.ok) return sendJson(res, 400, { message: check.message });
+      if (!check.ok) return sendJson(res, 400, { message: check.message, code: 'OTP_INVALID' });
 
       db.prepare('UPDATE users SET email_verified = 1, updated_at = ? WHERE email = ?').run(
         new Date().toISOString(),
@@ -302,12 +365,35 @@ export async function handleApiRequest(req, res) {
         return sendJson(res, 401, { message: 'Correo o contraseña incorrectos.' });
       }
       if (!user.email_verified) {
-        const otpInfo = await issueOtp(db, email, 'verify_email');
+        const cd = getActiveOtpCooldown(db, email, 'verify_email');
+        if (cd.inCooldown) {
+          return sendJson(res, 403, {
+            code: 'EMAIL_NOT_VERIFIED',
+            email,
+            accountStatus: 'pending_verification',
+            deliveryStatus: 'sent',
+            retryAfterSec: cd.retryAfterSec,
+            expiresInSec: cd.expiresInSec,
+            message: `Tu cuenta está pendiente de verificación. Usa el código enviado a ${email} o reenvía en ${cd.retryAfterSec}s.`
+          });
+        }
+        const otpInfo = await issueOtp(db, email, 'verify_email', { enforceCooldown: false });
         return sendJson(res, 403, {
           code: 'EMAIL_NOT_VERIFIED',
-          message: otpInfo.devOtpHint
-            ? `Verifica tu correo primero. Código OTP (desarrollo): ${otpInfo.devOtpHint}`
-            : 'Verifica tu correo con el código de 6 dígitos enviado.'
+          email,
+          accountStatus: 'pending_verification',
+          deliveryStatus: otpInfo.deliveryStatus,
+          provider: otpInfo.provider,
+          providerError: otpInfo.providerError,
+          cooldownSec: otpInfo.cooldownSec,
+          expiresInSec: otpInfo.expiresInSec,
+          devOtpHint: otpInfo.devOtpHint,
+          message:
+            otpInfo.deliveryStatus === 'sent'
+              ? `Cuenta pendiente de verificación. Código enviado a ${email}.`
+              : otpInfo.deliveryStatus === 'console_test'
+                ? `Verifica tu correo primero. Código OTP (pruebas): ${otpInfo.devOtpHint}`
+                : otpInfo.providerError || 'Cuenta pendiente de verificación: no se pudo enviar el correo.'
         });
       }
       const sess = createSessionForUser(db, user.id, req.headers['user-agent']?.slice(0, 48));
@@ -317,6 +403,17 @@ export async function handleApiRequest(req, res) {
         user: toPrivateUser(user, db),
         settings: getSettingsRow(db, user.id)
       });
+    }
+
+    if (pathname === '/api/auth/supabase-exchange' && method === 'POST') {
+      const body = await readJsonBody(req);
+      const out = await exchangeSupabaseSession({
+        accessToken: body.accessToken,
+        guestMigration: body.guestMigration,
+        deviceLabel: req.headers['user-agent']?.slice(0, 48)
+      });
+      setSessionCookie(res, out.token);
+      return sendJson(res, 200, out);
     }
 
     if (pathname === '/api/auth/reset-password' && method === 'POST') {
@@ -1014,6 +1111,7 @@ export async function handleApiRequest(req, res) {
   } catch (err) {
     const status = err.status || 500;
     return sendJson(res, status, {
+      ...(err.extra || {}),
       message: err.message || 'Error interno del servidor.',
       code: err.code || undefined
     });

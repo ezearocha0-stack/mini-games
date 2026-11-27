@@ -1,5 +1,14 @@
 # Changelog — Mini-Games Plataforma Gaming
 
+## [2.1.1] — 2026-11-27 · Autenticación Real OTP, Supabase Auth y Entrega Resend/SMTP
+
+### Diagnóstico y Correcciones
+- **Conexión Real con Supabase Auth (`@supabase/supabase-js`, `src/services/supabaseClient.js`, `src/services/authService.js`, `server/auth.js`)**: Integrados `signUp`, `verifyOtp`, `resend`, `signInWithOtp`, `signInWithPassword`, `resetPasswordForEmail` y endpoint `/api/auth/supabase-exchange`.
+- **Entrega Externa Real Sin Simulaciones (`server/mailer.js`, `server/env.js`)**: Reemplazado el fallback silencioso (`no-reply@example.com` + `catch {}`) por envío real vía Resend HTTP API o SMTP externo (`nodemailer`), cargando `.env`/`.env.local` al inicio y diferenciando respuestas reales `sent` (`201`), `rejected` (`502 EMAIL_DELIVERY_REJECTED`), `unconfigured` (`503 EMAIL_PROVIDER_NOT_CONFIGURED`) y `console_test` (solo con `MINIGAMES_TEST_CONSOLE_OTP=1`).
+- **Plantillas Supabase `{{ .Token }}` y Trigger de Perfiles**: Añadidas `supabase/templates/confirm_signup.html`, `magic_link.html` y `recovery.html`, `supabase/config.toml` con `[auth.email.smtp]` para Resend, y `supabase/migrations/003_auth_profile_trigger.sql` (`on_auth_user_created`).
+- **UI de Verificación y Reenvío Seguro (`src/ui/components/authModal.js`)**: Bloqueo del correo normalizado del registro (`readonly` con opción `Cambiar correo`), temporizador de caducidad de 10 minutos, botón `↻ Reenviar código` con enfriamiento de 60 s (`retryAfterSec` / máx. 5 envíos cada 15 min) y banners diferenciados para cuenta pendiente, envío aceptado o rechazo del proveedor.
+- **Diagnóstico CLI y Documentación**: Añadido `npm.cmd run check:email` (`scripts/verify-email-provider.mjs`) y guía paso a paso en `AUTH_OTP_SETUP.md`.
+
 ## [2.1.0] — 2026-11-27 · Expansión de Catálogo Crossplay (8 Juegos Activos + 8 Slots Futuros)
 
 ### Añadido
