@@ -28,10 +28,20 @@ npm install
 npm run dev
 ```
 
-## Despliegue en Vercel
+## Despliegue en Render (Web Service con WebSockets dedicados)
 
-El repositorio incluye `vercel.json` preconfigurado para Vite:
+El proyecto incluye [`server.js`](server.js) con soporte nativo de salas por **WebSockets (`/ws`)** y endpoint de salud `/healthz`:
+
+- **Language / Runtime:** `Node`
+- **Branch:** `main`
+- **Build Command:** `npm install && npm run build`
+- **Start Command:** `npm start`
+- **Plan:** Puedes usar el plan **Free (\$0/mes)** o un plan de pago si quieres evitar el arranque en frío tras inactividad.
+
+## Despliegue en Vercel (Estático + WebRTC P2P)
+
+El repositorio también incluye `vercel.json` preconfigurado para Vite (usa automáticamente el modo WebRTC P2P sin servidor):
 
 1. Importa el repositorio `ezearocha0-stack/mini-games` en [Vercel](https://vercel.com/new).
 2. Mantén los ajustes detectados automáticamente (`Framework Preset: Vite`, `Build Command: npm run build`, `Output Directory: dist`) y pulsa **Deploy**.
-3. Abre la URL de Vercel en tu PC, pulsa **Crear Sala P2P**, y escanea el código QR con la cámara de tu Android (donde además podrás pulsar **Instalar App** para jugarlo a pantalla completa).
+3. Abre la URL en tu PC, pulsa **Crear Sala P2P**, y escanea el código QR con la cámara de tu Android (donde además podrás pulsar **Instalar App** para jugarlo a pantalla completa).
