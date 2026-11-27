@@ -74,6 +74,23 @@ export function isValidEmail(raw) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email) && email.length <= 160;
 }
 
+export function validatePasswordStrength(raw) {
+  const pw = String(raw ?? '');
+  if (pw.length < 8) {
+    return { ok: false, message: 'La contraseña debe tener al menos 8 caracteres.' };
+  }
+  if (pw.length > 128) {
+    return { ok: false, message: 'La contraseña no puede superar los 128 caracteres.' };
+  }
+  if (!/[A-Za-z]/.test(pw) || !/\d/.test(pw)) {
+    return {
+      ok: false,
+      message: 'La contraseña debe incluir al menos una letra y un número.'
+    };
+  }
+  return { ok: true };
+}
+
 export function hashPassword(password) {
   const salt = crypto.randomBytes(16).toString('hex');
   const derived = crypto.scryptSync(password, salt, 64).toString('hex');

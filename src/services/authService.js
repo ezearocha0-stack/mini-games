@@ -7,6 +7,27 @@ function normalizeEmail(raw) {
   return String(raw || '').trim().toLowerCase();
 }
 
+function isValidEmailFormat(email) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email) && email.length <= 160;
+}
+
+export function validatePasswordClient(password) {
+  const pw = String(password ?? '');
+  if (pw.length < 8) {
+    return { ok: false, message: 'La contraseña debe tener al menos 8 caracteres.' };
+  }
+  if (pw.length > 128) {
+    return { ok: false, message: 'La contraseña no puede superar los 128 caracteres.' };
+  }
+  if (!/[A-Za-z]/.test(pw) || !/\d/.test(pw)) {
+    return {
+      ok: false,
+      message: 'La contraseña debe incluir al menos una letra y un número.'
+    };
+  }
+  return { ok: true };
+}
+
 function buildAuthError(message, code, extra = {}) {
   const err = new Error(message);
   err.code = code;
@@ -15,67 +36,41 @@ function buildAuthError(message, code, extra = {}) {
   return err;
 }
 
-function mapSupabaseAuthError(err, context = 'auth', email = '') {
+function mapSupabaseAuthError(err, email = '') {
   const raw = String(err?.message || 'Error en Supabase Auth');
   const low = raw.toLowerCase();
 
-  if (
-    low.includes('error sending') ||
-    low.includes('smtp') ||
-    low.includes('not authorized') ||
-    low.includes('sender') ||
-    low.includes('bounce')
-  ) {
-    return buildAuthError(
-      'Supabase rechazó el envío del correo de verificación (SMTP predeterminado restringido o SMTP externo mal configurado). Configura Custom SMTP con Resend en Supabase.',
-      'EMAIL_DELIVERY_REJECTED',
-      {
-        status: 502,
-        accountStatus: 'pending_verification',
-        deliveryStatus: 'rejected',
-        provider: 'supabase',
-        providerError: raw,
-        email
-      }
-    );
-  }
   if (low.includes('rate limit') || low.includes('too many') || low.includes('once every') || err?.status === 429) {
     const secMatch = raw.match(/(\d+)\s*seconds?/i);
     const retryAfterSec = secMatch ? Number(secMatch[1]) : 60;
     return buildAuthError(
-      `Límite de solicitudes de Supabase alcanzado. Espera ${retryAfterSec} segundos antes de reenviar.`,
-      'OTP_COOLDOWN',
+      `Demasiados intentos en Supabase. Espera ${retryAfterSec} segundos antes de intentarlo de nuevo.`,
+      'RATE_LIMIT',
       { status: 429, retryAfterSec, email }
     );
   }
   if (low.includes('already registered') || low.includes('already exists')) {
-    return buildAuthError('Ya existe una cuenta registrada con este correo.', 'EMAIL_ALREADY_EXISTS', {
-      status: 409,
-      email
-    });
+    return buildAuthError(
+      'Ya existe una cuenta registrada con este correo. Inicia sesión con tu contraseña.',
+      'EMAIL_ALREADY_EXISTS',
+      { status: 409, email }
+    );
+  }
+  if (low.includes('invalid login credentials')) {
+    return buildAuthError('Correo o contraseña incorrectos.', 'INVALID_CREDENTIALS', { status: 401, email });
   }
   if (low.includes('email not confirmed')) {
     return buildAuthError(
-      `Tu correo (${email}) aún está pendiente de verificación. Introduce el código de 6 dígitos o reenvíalo.`,
-      'EMAIL_NOT_VERIFIED',
-      {
-        status: 403,
-        accountStatus: 'pending_verification',
-        deliveryStatus: 'pending',
-        email,
-        cooldownSec: 0
-      }
+      'Tu proyecto de Supabase tiene «Confirm Email» activado. Desactívalo en Supabase Dashboard → Authentication → Sign In / Providers → Email → Confirm Email: OFF para permitir el acceso inmediato.',
+      'SUPABASE_CONFIRM_EMAIL_ENABLED',
+      { status: 403, email }
     );
   }
   if (low.includes('expired') || low.includes('token has expired')) {
-    return buildAuthError(
-      'El código OTP expiró. Pulsa «Reenviar código» para recibir uno nuevo.',
-      'OTP_EXPIRED',
-      { status: 400, email }
-    );
-  }
-  if (low.includes('invalid') && context === 'verify') {
-    return buildAuthError('Código OTP incorrecto o ya utilizado.', 'OTP_INVALID', { status: 400, email });
+    return buildAuthError('El código de recuperación expiró. Solicita uno nuevo.', 'RECOVERY_EXPIRED', {
+      status: 400,
+      email
+    });
   }
   return buildAuthError(raw, err?.code || 'SUPABASE_AUTH_ERROR', { status: err?.status || 400, email });
 }
@@ -95,7 +90,7 @@ function buildGuestMigrationPayload() {
 async function syncSupabaseSessionWithBackend(session) {
   const accessToken = session?.access_token;
   if (!accessToken) {
-    throw buildAuthError('No se recibió token de sesión tras verificar el código.', 'MISSING_ACCESS_TOKEN');
+    throw buildAuthError('Supabase no devolvió un token de sesión válido.', 'MISSING_ACCESS_TOKEN');
   }
   try {
     const data = await apiRequest('/api/auth/supabase-exchange', {
@@ -136,7 +131,7 @@ async function syncSupabaseSessionWithBackend(session) {
         level: 1,
         xp: 0,
         email: u.email,
-        emailVerified: Boolean(u.email_confirmed_at || u.confirmed_at),
+        emailVerified: false,
         stats: {
           eloGlobal: 1000,
           eloByGame: {},
@@ -195,8 +190,19 @@ export async function bootstrapSession() {
   return null;
 }
 
-export async function registerAccount({ email, password, username }) {
+export async function registerAccount({ email, password, confirmPassword, username }) {
   const cleanEmail = normalizeEmail(email);
+  if (!isValidEmailFormat(cleanEmail)) {
+    throw buildAuthError('Introduce un correo electrónico válido.', 'INVALID_EMAIL');
+  }
+  const pwCheck = validatePasswordClient(password);
+  if (!pwCheck.ok) {
+    throw buildAuthError(pwCheck.message, 'WEAK_PASSWORD');
+  }
+  if (String(password) !== String(confirmPassword ?? '')) {
+    throw buildAuthError('Las contraseñas no coinciden.', 'PASSWORD_MISMATCH');
+  }
+
   const guest = store.getState().guest;
   const cleanName = String(username || guest.name || 'Jugador').trim();
 
@@ -215,89 +221,52 @@ export async function registerAccount({ email, password, username }) {
     });
 
     if (error) {
-      throw mapSupabaseAuthError(error, 'register', cleanEmail);
+      throw mapSupabaseAuthError(error, cleanEmail);
     }
 
     if (Array.isArray(data?.user?.identities) && data.user.identities.length === 0) {
       throw buildAuthError(
-        'Ya existe una cuenta registrada con este correo. Inicia sesión o recupera tu contraseña.',
+        'Ya existe una cuenta registrada con este correo. Inicia sesión con tu contraseña.',
         'EMAIL_ALREADY_EXISTS',
         { status: 409, email: cleanEmail }
       );
     }
 
-    if (data?.session) {
-      const synced = await syncSupabaseSessionWithBackend(data.session);
-      return {
-        ok: true,
-        provider: 'supabase',
-        email: cleanEmail,
-        accountStatus: 'verified',
-        deliveryStatus: 'verified',
-        sessionReady: true,
-        ...synced
-      };
+    if (!data?.session) {
+      // Never fake a session when Confirm Email is still ON in remote Supabase Dashboard
+      throw buildAuthError(
+        'La cuenta se creó en Supabase, pero tu proyecto todavía requiere confirmación por correo. Desactiva «Confirm Email: OFF» en Supabase Dashboard → Authentication → Sign In / Providers → Email para iniciar sesión al instante.',
+        'SUPABASE_CONFIRM_EMAIL_ENABLED',
+        { status: 409, email: cleanEmail }
+      );
     }
 
+    const synced = await syncSupabaseSessionWithBackend(data.session);
     return {
       ok: true,
       provider: 'supabase',
-      email: cleanEmail,
-      accountStatus: 'pending_verification',
-      deliveryStatus: 'sent',
-      cooldownSec: 60,
-      expiresInSec: 600,
-      message: `Solicitud enviada a ${cleanEmail}. Introduce el código OTP de 6 dígitos de tu correo.`
+      ...synced
     };
   }
 
-  return apiRequest('/api/auth/register', {
+  const data = await apiRequest('/api/auth/register', {
     method: 'POST',
     body: {
       email: cleanEmail,
       password,
+      confirmPassword,
       username: cleanName,
       guestMigration: buildGuestMigrationPayload()
     }
   });
-}
-
-export async function verifyOtpCode({ email, code, purpose = 'verify_email' }) {
-  const cleanEmail = normalizeEmail(email);
-  const cleanCode = String(code || '').trim();
-
-  const sb = getSupabaseClient();
-  if (sb) {
-    const sbType =
-      purpose === 'verify_email' ? 'signup' : purpose === 'reset_password' ? 'recovery' : 'email';
-    const { data, error } = await sb.auth.verifyOtp({
-      email: cleanEmail,
-      token: cleanCode,
-      type: sbType
-    });
-    if (error) {
-      throw mapSupabaseAuthError(error, 'verify', cleanEmail);
-    }
-    if (purpose === 'reset_password') {
-      return { ok: true, provider: 'supabase', session: data?.session || null };
-    }
-    if (!data?.session) {
-      throw buildAuthError(
-        'Código validado sin sesión activa. Intenta iniciar sesión.',
-        'MISSING_SESSION',
-        { status: 400 }
-      );
-    }
-    return syncSupabaseSessionWithBackend(data.session);
-  }
-
-  const data = await apiRequest('/api/auth/verify-otp', {
-    method: 'POST',
-    body: { email: cleanEmail, code: cleanCode, purpose }
-  });
   if (data.token) setStoredToken(data.token);
   if (data.user) {
-    store.setState({ user: data.user });
+    store.setState({
+      user: data.user,
+      favoriteGames: Array.isArray(data.user.favoriteGames)
+        ? data.user.favoriteGames
+        : store.getState().favoriteGames
+    });
     if (data.settings) {
       const merged = store.saveLocalSettings(data.settings);
       applySettingsToDocument(merged);
@@ -306,46 +275,11 @@ export async function verifyOtpCode({ email, code, purpose = 'verify_email' }) {
   return data;
 }
 
-export async function requestOtpCode({ email, purpose = 'login' }) {
-  const cleanEmail = normalizeEmail(email);
-
-  const sb = getSupabaseClient();
-  if (sb) {
-    if (purpose === 'verify_email') {
-      const { error } = await sb.auth.resend({
-        type: 'signup',
-        email: cleanEmail
-      });
-      if (error) throw mapSupabaseAuthError(error, 'resend', cleanEmail);
-    } else if (purpose === 'reset_password') {
-      const { error } = await sb.auth.resetPasswordForEmail(cleanEmail);
-      if (error) throw mapSupabaseAuthError(error, 'reset', cleanEmail);
-    } else {
-      const { error } = await sb.auth.signInWithOtp({
-        email: cleanEmail,
-        options: { shouldCreateUser: false }
-      });
-      if (error) throw mapSupabaseAuthError(error, 'login_otp', cleanEmail);
-    }
-    return {
-      ok: true,
-      provider: 'supabase',
-      email: cleanEmail,
-      deliveryStatus: 'sent',
-      cooldownSec: 60,
-      expiresInSec: 600,
-      message: `Código reenviado a ${cleanEmail}.`
-    };
-  }
-
-  return apiRequest('/api/auth/request-otp', {
-    method: 'POST',
-    body: { email: cleanEmail, purpose }
-  });
-}
-
 export async function loginWithPassword({ email, password }) {
   const cleanEmail = normalizeEmail(email);
+  if (!isValidEmailFormat(cleanEmail)) {
+    throw buildAuthError('Introduce un correo electrónico válido.', 'INVALID_EMAIL');
+  }
   const sb = getSupabaseClient();
   if (sb) {
     const { data, error } = await sb.auth.signInWithPassword({
@@ -353,7 +287,7 @@ export async function loginWithPassword({ email, password }) {
       password
     });
     if (error) {
-      throw mapSupabaseAuthError(error, 'login', cleanEmail);
+      throw mapSupabaseAuthError(error, cleanEmail);
     }
     if (data?.session) {
       return syncSupabaseSessionWithBackend(data.session);
@@ -366,7 +300,12 @@ export async function loginWithPassword({ email, password }) {
   });
   if (data.token) setStoredToken(data.token);
   if (data.user) {
-    store.setState({ user: data.user });
+    store.setState({
+      user: data.user,
+      favoriteGames: Array.isArray(data.user.favoriteGames)
+        ? data.user.favoriteGames
+        : store.getState().favoriteGames
+    });
     if (data.settings) {
       const merged = store.saveLocalSettings(data.settings);
       applySettingsToDocument(merged);
@@ -375,9 +314,32 @@ export async function loginWithPassword({ email, password }) {
   return data;
 }
 
-export async function resetPasswordWithOtp({ email, code, newPassword }) {
+// Recuperación opcional de contraseña (no interfiere con registro ni login)
+export async function requestPasswordReset({ email }) {
+  const cleanEmail = normalizeEmail(email);
+  if (!isValidEmailFormat(cleanEmail)) {
+    throw buildAuthError('Introduce un correo electrónico válido.', 'INVALID_EMAIL');
+  }
+  const sb = getSupabaseClient();
+  if (sb) {
+    const { error } = await sb.auth.resetPasswordForEmail(cleanEmail);
+    if (error) throw mapSupabaseAuthError(error, cleanEmail);
+    return { ok: true, provider: 'supabase', cooldownSec: 60 };
+  }
+  return apiRequest('/api/auth/forgot-password', {
+    method: 'POST',
+    body: { email: cleanEmail }
+  });
+}
+
+export async function resetPasswordWithCode({ email, code, newPassword }) {
   const cleanEmail = normalizeEmail(email);
   const cleanCode = String(code || '').trim();
+  const pwCheck = validatePasswordClient(newPassword);
+  if (!pwCheck.ok) {
+    throw buildAuthError(pwCheck.message, 'WEAK_PASSWORD');
+  }
+
   const sb = getSupabaseClient();
   if (sb) {
     const { data, error } = await sb.auth.verifyOtp({
@@ -385,12 +347,12 @@ export async function resetPasswordWithOtp({ email, code, newPassword }) {
       token: cleanCode,
       type: 'recovery'
     });
-    if (error) throw mapSupabaseAuthError(error, 'verify', cleanEmail);
+    if (error) throw mapSupabaseAuthError(error, cleanEmail);
     if (!data?.session) {
-      throw buildAuthError('No se pudo abrir sesión de recuperación.', 'RECOVERY_FAILED');
+      throw buildAuthError('No se pudo validar el código de recuperación.', 'RECOVERY_FAILED');
     }
     const upd = await sb.auth.updateUser({ password: newPassword });
-    if (upd.error) throw mapSupabaseAuthError(upd.error, 'reset', cleanEmail);
+    if (upd.error) throw mapSupabaseAuthError(upd.error, cleanEmail);
     await sb.auth.signOut().catch(() => {});
     return { ok: true, provider: 'supabase' };
   }
@@ -466,6 +428,10 @@ export async function revokeSession(sessionId) {
 }
 
 export async function changePassword({ currentPassword, newPassword }) {
+  const pwCheck = validatePasswordClient(newPassword);
+  if (!pwCheck.ok) {
+    throw buildAuthError(pwCheck.message, 'WEAK_PASSWORD');
+  }
   return apiRequest('/api/auth/change-password', {
     method: 'POST',
     body: { currentPassword, newPassword }

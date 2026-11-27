@@ -14,9 +14,8 @@ import {
   setSessionCookie,
   clearSessionCookie,
   registerUser,
-  issueOtp,
-  getActiveOtpCooldown,
-  verifyOtpConsume,
+  issuePasswordResetCode,
+  verifyPasswordResetCode,
   exchangeSupabaseSession,
   loginWithGoogle
 } from './auth.js';
@@ -29,7 +28,8 @@ import {
   isValidEmail,
   hashPassword,
   verifyPassword,
-  sha256Hex
+  sha256Hex,
+  validatePasswordStrength
 } from './security.js';
 import { pushToUser, getOnlinePresenceForUser, getPublicRoomsList } from './wsRooms.js';
 import { unlockAchievement, RANKED_GAMES, getUserGameElo } from './elo.js';
@@ -245,156 +245,35 @@ export async function handleApiRequest(req, res) {
       return sendJson(res, 200, { rooms: getPublicRoomsList() });
     }
 
-    // AUTH ROUTES
+    // AUTH ROUTES (Registro e inicio de sesión directos sin OTP)
     if (pathname === '/api/auth/register' && method === 'POST') {
-      if (!rateLimiter.allow(`auth:${ip}`, 12, 60_000)) {
-        return sendJson(res, 429, { message: 'Demasiados intentos. Espera un minuto.', code: 'RATE_LIMIT' });
+      if (!rateLimiter.allow(`register:${ip}`, 8, 60_000)) {
+        return sendJson(res, 429, { message: 'Demasiados intentos de registro. Espera un minuto.', code: 'RATE_LIMIT' });
       }
       const body = await readJsonBody(req);
-      const out = await registerUser(body);
+      const out = await registerUser({
+        ...body,
+        deviceLabel: req.headers['user-agent']?.slice(0, 48)
+      });
+      setSessionCookie(res, out.token);
       return sendJson(res, 201, out);
     }
 
-    if (pathname === '/api/auth/request-otp' && method === 'POST') {
-      if (!rateLimiter.allow(`otp:${ip}`, 10, 60_000)) {
-        return sendJson(res, 429, {
-          message: 'Límite de envíos por red alcanzado. Espera un minuto.',
-          code: 'OTP_RATE_LIMIT',
-          retryAfterSec: 60
-        });
-      }
-      const body = await readJsonBody(req);
-      const email = String(body.email || '').trim().toLowerCase();
-      const purpose = ['verify_email', 'login', 'reset_password'].includes(body.purpose)
-        ? body.purpose
-        : 'login';
-      if (!isValidEmail(email)) return sendJson(res, 400, { message: 'Correo inválido.', code: 'INVALID_EMAIL' });
-
-      const user = db.prepare('SELECT id, email_verified FROM users WHERE email = ?').get(email);
-      if (!user) {
-        if (purpose === 'verify_email') {
-          return sendJson(res, 404, {
-            message: 'No existe ningún registro pendiente con ese correo. Verifica que escribiste el mismo email.',
-            code: 'ACCOUNT_NOT_FOUND'
-          });
-        }
-        return sendJson(res, 200, {
-          ok: true,
-          deliveryStatus: 'accepted_if_exists',
-          cooldownSec: 60,
-          message: 'Si la cuenta existe, enviamos el código OTP.'
-        });
-      }
-
-      if (purpose === 'verify_email' && user.email_verified) {
-        return sendJson(res, 409, {
-          message: 'Este correo ya está verificado. Ya puedes iniciar sesión.',
-          code: 'ALREADY_VERIFIED'
-        });
-      }
-
-      const resOtp = await issueOtp(db, email, purpose);
-      if (resOtp.deliveryStatus === 'rejected') {
-        return sendJson(res, 502, {
-          ok: false,
-          code: 'EMAIL_DELIVERY_REJECTED',
-          accountStatus: user.email_verified ? 'verified' : 'pending_verification',
-          deliveryStatus: 'rejected',
-          email,
-          provider: resOtp.provider,
-          providerError: resOtp.providerError,
-          message: resOtp.providerError || 'El proveedor rechazó el envío del correo.'
-        });
-      }
-      if (resOtp.deliveryStatus === 'unconfigured') {
-        return sendJson(res, 503, {
-          ok: false,
-          code: 'EMAIL_PROVIDER_NOT_CONFIGURED',
-          accountStatus: user.email_verified ? 'verified' : 'pending_verification',
-          deliveryStatus: 'unconfigured',
-          email,
-          provider: 'none',
-          message: resOtp.providerError || 'Proveedor de correo no configurado en el servidor.'
-        });
-      }
-      return sendJson(res, 200, {
-        ok: true,
-        accountStatus: user.email_verified ? 'verified' : 'pending_verification',
-        ...resOtp,
-        message:
-          resOtp.deliveryStatus === 'sent'
-            ? `Nuevo código enviado a ${email}.`
-            : 'Nuevo código generado (modo pruebas).'
-      });
-    }
-
-    if (pathname === '/api/auth/verify-otp' && method === 'POST') {
-      if (!rateLimiter.allow(`verify:${ip}`, 15, 60_000)) {
-        return sendJson(res, 429, { message: 'Demasiados intentos.', code: 'RATE_LIMIT' });
-      }
-      const body = await readJsonBody(req);
-      const email = String(body.email || '').trim().toLowerCase();
-      const purpose = ['verify_email', 'login'].includes(body.purpose) ? body.purpose : 'verify_email';
-      const check = verifyOtpConsume(db, email, purpose, body.code);
-      if (!check.ok) return sendJson(res, 400, { message: check.message, code: 'OTP_INVALID' });
-
-      db.prepare('UPDATE users SET email_verified = 1, updated_at = ? WHERE email = ?').run(
-        new Date().toISOString(),
-        email
-      );
-      const user = db.prepare('SELECT * FROM users WHERE email = ?').get(email);
-      if (!user) return sendJson(res, 404, { message: 'Usuario no encontrado.' });
-
-      const sess = createSessionForUser(db, user.id, req.headers['user-agent']?.slice(0, 48));
-      setSessionCookie(res, sess.rawToken);
-      return sendJson(res, 200, {
-        token: sess.rawToken,
-        user: toPrivateUser(user, db),
-        settings: getSettingsRow(db, user.id)
-      });
-    }
-
     if (pathname === '/api/auth/login' && method === 'POST') {
-      if (!rateLimiter.allow(`login:${ip}`, 12, 60_000)) {
-        return sendJson(res, 429, { message: 'Demasiados intentos de inicio de sesión.' });
+      if (!rateLimiter.allow(`login:${ip}`, 10, 60_000)) {
+        return sendJson(res, 429, { message: 'Demasiados intentos de inicio de sesión. Espera un minuto.' });
       }
       const body = await readJsonBody(req);
       const email = String(body.email || '').trim().toLowerCase();
+      if (!isValidEmail(email)) {
+        return sendJson(res, 400, { message: 'Correo electrónico inválido.' });
+      }
+      if (!rateLimiter.allow(`login_email:${email}`, 6, 60_000)) {
+        return sendJson(res, 429, { message: 'Demasiados intentos para esta cuenta. Espera un minuto.' });
+      }
       const user = db.prepare('SELECT * FROM users WHERE email = ?').get(email);
       if (!user || !verifyPassword(String(body.password || ''), user.password_hash)) {
         return sendJson(res, 401, { message: 'Correo o contraseña incorrectos.' });
-      }
-      if (!user.email_verified) {
-        const cd = getActiveOtpCooldown(db, email, 'verify_email');
-        if (cd.inCooldown) {
-          return sendJson(res, 403, {
-            code: 'EMAIL_NOT_VERIFIED',
-            email,
-            accountStatus: 'pending_verification',
-            deliveryStatus: 'sent',
-            retryAfterSec: cd.retryAfterSec,
-            expiresInSec: cd.expiresInSec,
-            message: `Tu cuenta está pendiente de verificación. Usa el código enviado a ${email} o reenvía en ${cd.retryAfterSec}s.`
-          });
-        }
-        const otpInfo = await issueOtp(db, email, 'verify_email', { enforceCooldown: false });
-        return sendJson(res, 403, {
-          code: 'EMAIL_NOT_VERIFIED',
-          email,
-          accountStatus: 'pending_verification',
-          deliveryStatus: otpInfo.deliveryStatus,
-          provider: otpInfo.provider,
-          providerError: otpInfo.providerError,
-          cooldownSec: otpInfo.cooldownSec,
-          expiresInSec: otpInfo.expiresInSec,
-          devOtpHint: otpInfo.devOtpHint,
-          message:
-            otpInfo.deliveryStatus === 'sent'
-              ? `Cuenta pendiente de verificación. Código enviado a ${email}.`
-              : otpInfo.deliveryStatus === 'console_test'
-                ? `Verifica tu correo primero. Código OTP (pruebas): ${otpInfo.devOtpHint}`
-                : otpInfo.providerError || 'Cuenta pendiente de verificación: no se pudo enviar el correo.'
-        });
       }
       const sess = createSessionForUser(db, user.id, req.headers['user-agent']?.slice(0, 48));
       setSessionCookie(res, sess.rawToken);
@@ -416,16 +295,57 @@ export async function handleApiRequest(req, res) {
       return sendJson(res, 200, out);
     }
 
+    // Recuperación de contraseña (solo cuando existe proveedor de correo configurado)
+    if (pathname === '/api/auth/forgot-password' && method === 'POST') {
+      if (!rateLimiter.allow(`forgot:${ip}`, 6, 60_000)) {
+        return sendJson(res, 429, {
+          message: 'Demasiadas solicitudes de recuperación. Espera un minuto.',
+          code: 'RECOVERY_RATE_LIMIT',
+          retryAfterSec: 60
+        });
+      }
+      const body = await readJsonBody(req);
+      const email = String(body.email || '').trim().toLowerCase();
+      if (!isValidEmail(email)) {
+        return sendJson(res, 400, { message: 'Correo electrónico inválido.' });
+      }
+      const user = db.prepare('SELECT id FROM users WHERE email = ?').get(email);
+      if (!user) {
+        return sendJson(res, 200, {
+          ok: true,
+          cooldownSec: 60,
+          message: 'Si la cuenta existe y hay correo configurado, enviaremos el código.'
+        });
+      }
+      const resRec = await issuePasswordResetCode(db, email);
+      if (resRec.deliveryStatus === 'rejected') {
+        return sendJson(res, 502, {
+          ok: false,
+          code: 'EMAIL_DELIVERY_REJECTED',
+          message: resRec.providerError || 'El proveedor rechazó el correo de recuperación.'
+        });
+      }
+      if (resRec.deliveryStatus === 'unconfigured') {
+        return sendJson(res, 503, {
+          ok: false,
+          code: 'EMAIL_PROVIDER_NOT_CONFIGURED',
+          message: 'La recuperación por correo requiere configurar un proveedor SMTP o Resend.'
+        });
+      }
+      return sendJson(res, 200, { ok: true, ...resRec });
+    }
+
     if (pathname === '/api/auth/reset-password' && method === 'POST') {
       const body = await readJsonBody(req);
       const email = String(body.email || '').trim().toLowerCase();
-      if (!body.newPassword || String(body.newPassword).length < 8) {
-        return sendJson(res, 400, { message: 'La nueva contraseña debe tener al menos 8 caracteres.' });
+      const pwCheck = validatePasswordStrength(body.newPassword);
+      if (!pwCheck.ok) {
+        return sendJson(res, 400, { message: pwCheck.message, code: 'WEAK_PASSWORD' });
       }
-      const check = verifyOtpConsume(db, email, 'reset_password', body.code);
+      const check = verifyPasswordResetCode(db, email, body.code);
       if (!check.ok) return sendJson(res, 400, { message: check.message });
 
-      db.prepare('UPDATE users SET password_hash = ?, email_verified = 1, updated_at = ? WHERE email = ?').run(
+      db.prepare('UPDATE users SET password_hash = ?, updated_at = ? WHERE email = ?').run(
         hashPassword(String(body.newPassword)),
         new Date().toISOString(),
         email
@@ -470,7 +390,7 @@ export async function handleApiRequest(req, res) {
           `SELECT id, public_id, tag, username, avatar_color, avatar_icon, level, wins, losses, matches_played, best_streak,
                   elo_global, elo_hockey, elo_connect4, elo_tictactoe, elo_by_game
            FROM users
-           WHERE email_verified = 1 AND matches_played > 0`
+           WHERE matches_played > 0`
         )
         .all();
 
@@ -539,8 +459,9 @@ export async function handleApiRequest(req, res) {
       if (me.password_hash && !verifyPassword(String(body.currentPassword || ''), me.password_hash)) {
         return sendJson(res, 400, { message: 'La contraseña actual no es correcta.' });
       }
-      if (!body.newPassword || String(body.newPassword).length < 8) {
-        return sendJson(res, 400, { message: 'La nueva contraseña debe tener mínimo 8 caracteres.' });
+      const newPwCheck = validatePasswordStrength(body.newPassword);
+      if (!newPwCheck.ok) {
+        return sendJson(res, 400, { message: newPwCheck.message, code: 'WEAK_PASSWORD' });
       }
       db.prepare('UPDATE users SET password_hash = ?, updated_at = ? WHERE id = ?').run(
         hashPassword(String(body.newPassword)),
@@ -630,7 +551,7 @@ export async function handleApiRequest(req, res) {
       const rows = db
         .prepare(
           `SELECT * FROM users
-           WHERE id <> ? AND email_verified = 1
+           WHERE id <> ?
              AND (username LIKE ? OR tag = ? OR public_id = ?)
            LIMIT 20`
         )

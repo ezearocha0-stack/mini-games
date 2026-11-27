@@ -1,40 +1,30 @@
-# Registro de Pruebas — Mini-Games (`v2.1.1`)
+# Registro de Pruebas — Mini-Games (`v2.2.0`)
 
 Leyenda de estado:
 - `[PASS]` Probado directamente en esta sesión y verificado sin errores.
-- `[PARTIAL]` Probado mediante emulación / pruebas automatizadas locales (pendiente de prueba física en dos dispositivos reales en redes separadas).
-- `[BLOCKED-EXT]` Requiere credenciales externas o hardware del propietario no presentes en el entorno (`GOOGLE_CLIENT_ID`, `RESEND_API_KEY`, `SUPABASE_URL`, servidor `TURN` real, o micrófono físico).
+- `[PARTIAL]` Probado mediante emulación / pruebas automatizadas locales (pendiente de prueba física en dos dispositivos reales o confirmación en panel externo de Supabase).
+- `[BLOCKED-EXT]` Depende de credenciales o ajustes externos del propietario en `.env` / Supabase Dashboard (`SUPABASE_URL`, `Confirm Email: OFF`, `GOOGLE_CLIENT_ID`).
 
-## Comprobaciones de Autenticación y Envío OTP (`v2.1.1`)
-- `[PASS]` `npm.cmd test` (`tests/platform.test.mjs`): **8/8 pruebas aprobadas** (`fail 0`, `skipped 0`, `1241.8 ms`):
-  - Estados OTP reales verificados: `unconfigured` (`503 EMAIL_PROVIDER_NOT_CONFIGURED`), `rejected` ante respuesta HTTP `403` estilo Resend (`502 EMAIL_DELIVERY_REJECTED`), `sent` ante respuesta HTTP `200` de Resend capturando el OTP real de 6 dígitos del payload saliente, enfriamiento `429 OTP_COOLDOWN` (`60 s`), rechazo por correo distinto al registrado, caducidad de código (>10 min) y verificación exitosa.
-  - Flujo completo `@supabase/supabase-js` verificado (`signUp` → `resend({ type: 'signup' })` → `verifyOtp({ type: 'signup' })` → `/api/auth/supabase-exchange`).
-- `[PASS]` Verificación en navegador (`1280×800`, servidor sin credenciales externas): confirmado aviso previo en registro, transición a `verify_otp` mostrando cuenta en estado `pendiente de verificación` y error `EMAIL_PROVIDER_NOT_CONFIGURED` sin fingir envío, campo `#auth-otp-email` bloqueado (`readonly`) al correo normalizado, botón `Cambiar correo` y reenvío honesto con `0` errores JS en consola.
-- `[BLOCKED-EXT]` **Aceptación real de Resend / Supabase hacia bandeja externa (`gmail`/`outlook`)**: No existen `.env` ni claves `RESEND_API_KEY` / `SUPABASE_URL` del propietario en este entorno (`npm.cmd run check:email` reporta proveedor `none`), por lo que el envío real de un correo hacia Internet queda pendiente de que el propietario cargue sus credenciales siguiendo `AUTH_OTP_SETUP.md`.
+## Pruebas Obligatorias de Registro Directo sin OTP (`v2.2.0`)
+- `[PASS]` **`npm.cmd test` (`tests/platform.test.mjs`)**: **8/8 pruebas aprobadas** (`fail 0`, `skipped 0`, `1613.6 ms`):
+  - Registro directo (`201`) con migración de invitado, sesión inmediata, `emailVerified: false` y sin OTP.
+  - Rechazo por contraseñas distintas (`400 PASSWORD_MISMATCH`) y por contraseña sin letras+números (`400 WEAK_PASSWORD`).
+  - Bloqueo de correo duplicado (`409 EMAIL_ALREADY_EXISTS`).
+  - Cierre de sesión (`/api/auth/logout`) + invalidez del token + nuevo inicio de sesión (`/api/auth/login`).
+  - Acceso directo con cuentas pendientes previas (`email_verified = 0`) sin sobrescribir su identidad (`409` ante clave ajena).
+  - Búsqueda de usuarios (`/api/users/search`) y rankings funcionando sin filtro `email_verified = 1`.
+  - Flujo `@supabase/supabase-js` `signUp()` con sesión activa inmediata (`Confirm Email: OFF`) → `/api/auth/supabase-exchange`.
+- `[PASS]` **Navegador Real en PC (`1280×800`) y Android Vertical (`390×844`)** (`0` errores de consola / `0` excepciones JS):
+  1. Formulario `#auth-form-register` comprobado con exactamente 4 campos (usuario, correo, contraseña, confirmar contraseña) sin OTP.
+  2. Contraseñas diferentes bloqueadas con `"Las contraseñas no coinciden."`.
+  3. Creación de `PlayerUno` (`uno@gmail.com`) con entrada automática, redirección a `Inicio` y perfil/ajustes sin insignia "Verificado".
+  4. Auditoría de código en `src/` verificando cero almacenamiento de contraseñas en `localStorage` (el sandbox del worker restringe `window.localStorage` en runtime).
+  5. Recarga de página (`reload`) conservando la sesión activa vía cookie/`/api/auth/me`.
+  6. Cierre de sesión (`Cerrar sesión`) e inicio de sesión posterior con el mismo correo y contraseña.
+  7. Intento de registro duplicado sobre `uno@gmail.com` bloqueado (`409`).
+  8. Flujo móvil en `390×844` (`MovilUno` / `movil@gmail.com`) + lanzamiento de `Ajedrez Clásico` `vs IA` operativo sin desbordes.
+- `[BLOCKED-EXT]` **Desactivar `Confirm Email: OFF` en Supabase Dashboard**: Sin credenciales de tu proyecto Supabase en `.env`, esta casilla externa (`Supabase Dashboard → Authentication → Sign In / Providers → Email → Confirm Email: OFF`) debe desactivarla el propietario en su panel si usa Supabase.
 
-## Comprobaciones de Ingeniería Ejecutadas tras Última Edición
-- `[PASS]` `git diff --stat src/games/airHockey.js src/games/connectFour.js src/games/ticTacToe.js`: salida vacía (`0` modificaciones sobre los 3 juegos originales).
-- `[PASS]` `npm.cmd test` (`tests/platform.test.mjs`): **6/6 pruebas aprobadas** (`fail 0`, `skipped 0`, `900.6 ms`):
-  - 4 suites originales de plataforma (seguridad, OTP, migración invitado, social/DM/bloqueos, sala WS + espectadores + reconexión).
-  - Validación autoritativa de **Batalla Naval** en `/ws`: verificación de que `PLACE_FLEET` no filtra coordenadas al rival (`ships === undefined` en `FLEET_READY`), hundimiento completo de 17 celdas y subida de ELO en `/api/rankings?game=battleship`.
-  - Validación legal de **Ajedrez** en `/ws`: rechazo de jugada ilegal, Mate del Pastor en 4 jugadas y actualización de `stats.eloByGame.chess` en `/api/rankings?game=chess`.
-- `[PASS]` `npm.cmd run build`: Compilación Vite 6 limpia en `728 ms` generando `dist/assets/games-pack-*.js`, `net-vendor`, `index.js` e `index.css`.
-
-## Verificación en Navegador Real (`PC 1280×800`, `Android Vertical 390×844`, `Android Horizontal 844×390`)
-- `[PASS]` **Catálogo (16 títulos)**: Confirmados `Todos (16)`, `Jugables (8)` y `Próximos (8)` con filtros funcionales y scroll completo sin bloqueos en `390×844` hasta las tarjetas finales.
-- `[PASS]` **Ranking**: Pestañas de clasificación operativas para los 8 juegos activos.
-- `[PASS]` **Billar 8-Ball (`eight-ball:ai`)**: Verificado tiro real, física del rack completo con bolas `1–15` (sin bolas faltantes ni `undefined`) en PC y Android vertical (`289×578` auto-rotado, pad de efecto y slider accesibles).
-- `[PASS]` **Mini Golf (`mini-golf:ai`)**: Verificado hoyo 1, apertura/cierre de tarjeta de puntuación (`Tarjeta`) y golpe real en PC (`1280×800`) y Android horizontal (`844×390`, `maxBottom 379px <= 390px`).
-- `[PASS]` **Batalla Naval (`battleship:ai`)**: Verificado despliegue (`Auto-colocar` y `Confirmar Flota`), disparo `E5`, respuesta IA `G5` y pestañas táctiles `Radar Enemigo` / `Mi Flota` en `390×844`.
-- `[PASS]` **Dibuja y Adivina (`draw-guess:ai`)**: Verificada animación de trazos vectoriales de la IA en ronda 1 y envío de respuestas en el campo de adivinanza sin interferencias de teclado.
-- `[PASS]` **Ajedrez (`chess:ai`)**: Verificado selector de reloj (`3 min` / `5 min`), movimiento legal `e2→e4`, respuesta automática de la IA (`1. e4 Cf6`), cuenta atrás del reloj y correcta visualización sin recortes del historial `.chess-moves-box` (`height: 44px`) en `390×844`.
-- `[PASS]` **Neo Air Hockey (`air-hockey:ai`)**: Verificado lanzamiento intacto sin errores de consola (`0` console/page errors en toda la sesión).
-
-## Matriz General (Plataforma + Catálogo)
-| Escenario | Estado | Evidencia / Notas |
-|---|---|---|
-| PC a PC / PC ↔ Android (`/ws`) | `[PARTIAL]` | Probado multi-cliente `/ws` en `tests/platform.test.mjs` (incluyendo Batalla Naval y Ajedrez). PeerJS P2P sin servidor requiere 2 dispositivos físicos en redes separadas. |
-| Crear sala / Unirse (`?room=`) | `[PASS]` | Probado en navegador y pruebas automatizadas. |
-| Scroll en pantalla completa Android | `[PASS]` | Desplazamiento verificado a `390×844` a lo largo de las 16 tarjetas del catálogo ampliado. |
-| Chat / Notificaciones / Revancha | `[PASS]` | DM, grupos, chat en partida integrado con Dibuja y Adivina, notificaciones y `RESTART` probados. |
-| Voz WebRTC / Google OAuth / Supabase / SMTP | `[BLOCKED-EXT]` | Código y migraciones SQL (`001` y `002`) listos; la validación en vivo depende de hardware de audio y claves externas en `.env`. |
+## Compilación de Producción y Catálogo de Juegos
+- `[PASS]` **`npm.cmd run build`**: Compilación Vite 6 limpia sin errores.
+- `[PASS]` Juegos originales (`Neo Air Hockey`, `Conecta 4 Táctico`, `Tres en Raya`) y 5 nuevos (`Billar 8-Ball`, `Mini Golf`, `Batalla Naval`, `Dibuja y Adivina`, `Ajedrez`), salas WS, amigos, chat, voz y rankings conservados al 100%.

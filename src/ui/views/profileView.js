@@ -51,7 +51,6 @@ export function renderProfileView(state, actions) {
           <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
             <strong style="font-size:1.28rem;">${escapeHtml(identity.name)}</strong>
             <span class="pill accent">${isGuest ? 'INVITADO' : `#${escapeHtml(identity.tag)}`}</span>
-            ${user?.emailVerified ? '<span class="pill ok">✓ Verificado</span>' : ''}
           </div>
           <div style="margin-top:4px;font-family:var(--font-mono);font-size:0.76rem;color:var(--text-muted);">
             ID Permanente: <strong>${escapeHtml(identity.publicId)}</strong> · Estado: ${escapeHtml(formatPresenceLabel(isGuest ? 'online' : state.presenceStatus))}
@@ -140,7 +139,7 @@ export function renderProfileView(state, actions) {
         ${
           badges.length === 0
             ? `<div class="empty-state" style="padding:18px;">
-                 <span>Las insignias competitivas se desbloquean automáticamente al competir con una cuenta verificada.</span>
+                 <span>Las insignias competitivas se desbloquean automáticamente al competir con tu cuenta.</span>
                </div>`
             : `<div class="list-stack">
                  ${badges

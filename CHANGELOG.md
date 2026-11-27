@@ -1,5 +1,17 @@
 # Changelog — Mini-Games Plataforma Gaming
 
+## [2.2.0] — 2026-11-27 · Registro Directo sin OTP (Usuario + Correo + Contraseña)
+
+### Cambiado
+- **Nuevo Registro Directo sin Verificación OTP ([authModal.js](file:///C:/Users/Pc%20Gamer/Desktop/Escritorio/Tarea/proyectos%20Personales/Juego%20online/src/ui/components/authModal.js), [authService.js](file:///C:/Users/Pc%20Gamer/Desktop/Escritorio/Tarea/proyectos%20Personales/Juego%20online/src/services/authService.js), [auth.js](file:///C:/Users/Pc%20Gamer/Desktop/Escritorio/Tarea/proyectos%20Personales/Juego%20online/server/auth.js), [api.js](file:///C:/Users/Pc%20Gamer/Desktop/Escritorio/Tarea/proyectos%20Personales/Juego%20online/server/api.js))**:
+  - Formulario simplificado a 4 campos: **Nombre de usuario**, **Correo electrónico**, **Contraseña** y **Confirmar contraseña**.
+  - Validación de formato de correo, fortaleza de contraseña (`>= 8` caracteres con letras y números en [security.js](file:///C:/Users/Pc%20Gamer/Desktop/Escritorio/Tarea/proyectos%20Personales/Juego%20online/server/security.js)) y coincidencia exacta de contraseñas.
+  - Creación inmediata de cuenta + inicio de sesión automático + migración de perfil de invitado + redirección a `Inicio` ([main.js](file:///C:/Users/Pc%20Gamer/Desktop/Escritorio/Tarea/proyectos%20Personales/Juego%20online/src/main.js)).
+- **Integración Supabase Auth `Confirm Email: OFF`**: `supabase.auth.signUp()` trabaja con sesión directa sin requerir `verifyOtp` ni marcar `email_verified = 1`, rechazando simular sesiones falsas si `Confirm Email` siguiera activo en Supabase.
+- **Limpieza y Coherencia**: Eliminados la pantalla `verify_otp`, botón de reenvío, temporizadores OTP, rutas `/api/auth/verify-otp` y `/api/auth/request-otp`, insignias de "Verificado/Pendiente" en [profileView.js](file:///C:/Users/Pc%20Gamer/Desktop/Escritorio/Tarea/proyectos%20Personales/Juego%20online/src/ui/views/profileView.js) y [settingsView.js](file:///C:/Users/Pc%20Gamer/Desktop/Escritorio/Tarea/proyectos%20Personales/Juego%20online/src/ui/views/settingsView.js), y filtros `email_verified = 1` en rankings y búsqueda de usuarios.
+- **Cuentas Pendientes de Pruebas Anteriores**: Pueden iniciar sesión directamente con su contraseña sin pérdida de identidad, mientras terceros no pueden sobrescribirlas (`409 EMAIL_ALREADY_EXISTS`).
+- **Recuperación de Contraseña**: Conservada de forma opcional mediante `/api/auth/forgot-password`, `/api/auth/reset-password` y `resetPasswordForEmail` sin bloquear registro ni login.
+
 ## [2.1.1] — 2026-11-27 · Autenticación Real OTP, Supabase Auth y Entrega Resend/SMTP
 
 ### Diagnóstico y Correcciones

@@ -32,7 +32,7 @@ Plataforma web multijugador **Crossplay P2P** y **PWA instalable** diseñada par
 ## Funcionalidades de Plataforma
 
 - **Diseño Adaptativo PC y Android**: Tema oscuro *Obsidian Gaming* (y tema claro), acentos configurables, barra lateral colapsable + panel social en PC, barra táctil inferior y rail compacto en horizontal para Android, y scroll fluido en pantalla completa (`src/ui/viewport.js`).
-- **Invitados + Cuentas Opcionales**: Juega gratis como invitado mediante código de 5 caracteres o QR (`?room=XXXXX`), o crea una cuenta con verificación OTP de 6 dígitos (con migración de perfil local).
+- **Invitados + Registro Directo sin OTP**: Juega gratis como invitado mediante código de 5 caracteres o QR (`?room=XXXXX`), o crea una cuenta en un paso con usuario, correo y contraseña (migrando tu perfil local automáticamente al inicio).
 - **Amigos, Chat y Voz WebRTC**: Solicitudes, presencia en tiempo real, bloqueos, reportes, mensajes privados y grupales, chat integrado dentro de partidas y canal de voz WebRTC con micrófono apagado por defecto y Push-to-Talk (`V`).
 - **Competitivo Validado en Servidor**: ELO global y por juego, niveles, XP, rachas, historial e insignias calculados autoritativamente en backend (`server/elo.js`).
 
@@ -63,8 +63,8 @@ npm run dev
 
 Consulta [`.env.example`](.env.example) para configurar opcionalmente:
 - **Base de datos local autónoma**: Funciona de serie con `node:sqlite` (`.data/minigames.sqlite`) sin coste ni configuración externa.
-- **Supabase (`SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`)**: Incluye migración completa SQL + Row Level Security en [`supabase/migrations/001_initial_schema.sql`](supabase/migrations/001_initial_schema.sql).
-- **Correo OTP (`RESEND_API_KEY` + `SMTP_FROM`, `SMTP_*` o Supabase Custom SMTP)**: Consulta [`AUTH_OTP_SETUP.md`](AUTH_OTP_SETUP.md) para configurar el envío real hacia cualquier correo externo con Resend, plantilla `{{ .Token }}` y verificación mediante `npm.cmd run check:email -- correo@ejemplo.com`. Sin proveedor configurado, la plataforma advierte explícitamente que no se envió correo en lugar de simularlo.
+- **Supabase (`SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`)**: Incluye migración completa SQL + Row Level Security en [`supabase/migrations/001_initial_schema.sql`](supabase/migrations/001_initial_schema.sql) y trigger de perfiles [`003_auth_profile_trigger.sql`](supabase/migrations/003_auth_profile_trigger.sql). Desactiva `Confirm Email: OFF` en `Supabase Dashboard → Authentication → Sign In / Providers → Email`.
+- **Recuperación de contraseña opcional (`RESEND_API_KEY` + `SMTP_FROM`, `SMTP_*` o Supabase)**: Consulta [`AUTH_OTP_SETUP.md`](AUTH_OTP_SETUP.md). El registro y el inicio de sesión son directos y no requieren envío de correo.
 - **Google OAuth (`GOOGLE_CLIENT_ID`)**: Verificación de ID Tokens de Google cuando esté configurado.
 - **TURN WebRTC (`TURN_URLS`, `TURN_SHARED_SECRET` o credenciales)**: Servidos de forma segura vía `/api/rtc/ice` sin exponer secretos en el frontend.
 

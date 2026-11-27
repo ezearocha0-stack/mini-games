@@ -177,14 +177,13 @@ export function renderSettingsView(state) {
                    <span class="field-label">Correo electrónico</span>
                    <div style="display:flex;align-items:center;gap:8px;">
                      <strong>${escapeHtml(state.user.email)}</strong>
-                     <span class="pill ${state.user.emailVerified ? 'ok' : 'warn'}">${state.user.emailVerified ? 'Verificado' : 'Pendiente'}</span>
                    </div>
                  </div>
 
                  <form class="form-stack" data-form="change-password">
                    <strong style="font-size:0.9rem;">Cambiar contraseña</strong>
                    <input type="password" name="currentPassword" class="text-input" placeholder="Contraseña actual" required minlength="6" />
-                   <input type="password" name="newPassword" class="text-input" placeholder="Nueva contraseña (mín. 8 caracteres)" required minlength="8" />
+                   <input type="password" name="newPassword" class="text-input" placeholder="Nueva contraseña (mín. 8, letras y números)" required minlength="8" />
                    <button type="submit" class="btn btn-secondary btn-compact">Actualizar contraseña</button>
                  </form>
                </div>

@@ -241,10 +241,14 @@ const notifications = createNotificationCenter({
 const authModal = createAuthModalController({
   store,
   showToast,
-  onAuthenticated: async () => {
+  onAuthenticated: async (info) => {
     await refreshSocialData();
     syncWsIdentity();
     connectPresenceSocket();
+    if (info?.isNewRegistration && !store.getState().gameSession.activeGameId) {
+      navigateTo('inicio');
+    }
+    renderActiveSection();
   }
 });
 

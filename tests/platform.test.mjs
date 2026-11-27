@@ -128,12 +128,13 @@ describe('Mini-Games Platform Integration Suite', () => {
     delete process.env.TURN_SHARED_SECRET;
   });
 
-  it('registers users with guest migration, 6-digit OTP verification, and protects public_id & email', async () => {
+  it('registers users directly without OTP, migrates guest data, and protects public_id & email', async () => {
     const regA = await jsonApi('/api/auth/register', {
       method: 'POST',
       body: {
         email: 'alpha@example.com',
         password: 'Password123!',
+        confirmPassword: 'Password123!',
         username: 'AlphaPro',
         guestMigration: {
           guestId: 'gst_test_alpha',
@@ -146,17 +147,12 @@ describe('Mini-Games Platform Integration Suite', () => {
       }
     });
     assert.equal(regA.status, 201);
-    assert.match(regA.data.devOtpHint, /^\d{6}$/);
-
-    const verA = await jsonApi('/api/auth/verify-otp', {
-      method: 'POST',
-      body: { email: 'alpha@example.com', code: regA.data.devOtpHint, purpose: 'verify_email' }
-    });
-    assert.equal(verA.status, 200);
-    assert.ok(verA.data.token);
-    tokenA = verA.data.token;
-    userA = verA.data.user;
-    assert.equal(verA.data.settings.theme, 'light');
+    assert.ok(regA.data.token);
+    assert.equal(regA.data.user.emailVerified, false);
+    assert.equal(regA.data.devOtpHint, undefined);
+    tokenA = regA.data.token;
+    userA = regA.data.user;
+    assert.equal(regA.data.settings.theme, 'light');
     assert.deepEqual(userA.favoriteGames, ['air-hockey']);
 
     // Public profile must hide email
@@ -172,28 +168,37 @@ describe('Mini-Games Platform Integration Suite', () => {
     });
     assert.equal(badPatch.status, 403);
 
-    // Register User B & User C
+    // Register User B & User C directly
     const regB = await jsonApi('/api/auth/register', {
       method: 'POST',
-      body: { email: 'beta@example.com', password: 'Password123!', username: 'BetaGamer' }
+      body: {
+        email: 'beta@example.com',
+        password: 'Password123!',
+        confirmPassword: 'Password123!',
+        username: 'BetaGamer'
+      }
     });
-    const verB = await jsonApi('/api/auth/verify-otp', {
-      method: 'POST',
-      body: { email: 'beta@example.com', code: regB.data.devOtpHint, purpose: 'verify_email' }
-    });
-    tokenB = verB.data.token;
-    userB = verB.data.user;
+    assert.equal(regB.status, 201);
+    tokenB = regB.data.token;
+    userB = regB.data.user;
 
     const regC = await jsonApi('/api/auth/register', {
       method: 'POST',
-      body: { email: 'gamma@example.com', password: 'Password123!', username: 'GammaSpec' }
+      body: {
+        email: 'gamma@example.com',
+        password: 'Password123!',
+        confirmPassword: 'Password123!',
+        username: 'GammaSpec'
+      }
     });
-    const verC = await jsonApi('/api/auth/verify-otp', {
-      method: 'POST',
-      body: { email: 'gamma@example.com', code: regC.data.devOtpHint, purpose: 'verify_email' }
-    });
-    tokenC = verC.data.token;
-    userC = verC.data.user;
+    assert.equal(regC.status, 201);
+    tokenC = regC.data.token;
+    userC = regC.data.user;
+
+    // Search must find registered users without requiring email_verified = 1
+    const searchRes = await jsonApi('/api/users/search?q=BetaGamer', { token: tokenA });
+    assert.equal(searchRes.status, 200);
+    assert.ok(searchRes.data.users.some((u) => u.id === userB.id));
   });
 
   it('supports friend requests, DMs, reactions, group permissions, rate limits, and blocks', async () => {
@@ -577,146 +582,135 @@ describe('Mini-Games Platform Integration Suite', () => {
     }
   });
 
-  it('distinguishes unconfigured, rejected, and Resend-accepted OTP emails, enforces resend cooldown, email match & expiry', async () => {
-    const prevConsole = process.env.MINIGAMES_TEST_CONSOLE_OTP;
-    const prevResendKey = process.env.RESEND_API_KEY;
-    const prevFrom = process.env.SMTP_FROM;
-    const prevBase = process.env.RESEND_API_BASE_URL;
-
-    let resendMode = 'reject';
-    let lastEmailPayload = null;
-    const mockResend = http.createServer((req, res) => {
-      const chunks = [];
-      req.on('data', (c) => chunks.push(c));
-      req.on('end', () => {
-        lastEmailPayload = JSON.parse(Buffer.concat(chunks).toString('utf8'));
-        if (resendMode === 'reject') {
-          res.writeHead(403, { 'Content-Type': 'application/json' });
-          res.end(
-            JSON.stringify({
-              name: 'validation_error',
-              message: 'You can only send testing emails to your own email address (verified domain required).'
-            })
-          );
-          return;
-        }
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ id: 're_test_msg_001' }));
-      });
+  it('enforces password rules, rejects duplicates, supports logout/login, legacy pending accounts, and optional recovery', async () => {
+    // 1. Mismatched passwords
+    const mismatch = await jsonApi('/api/auth/register', {
+      method: 'POST',
+      body: {
+        email: 'mismatch@gmail.com',
+        password: 'Password123!',
+        confirmPassword: 'OtherPassword999!',
+        username: 'Mismatch'
+      }
     });
+    assert.equal(mismatch.status, 400);
+    assert.equal(mismatch.data.code, 'PASSWORD_MISMATCH');
 
-    await new Promise((r) => mockResend.listen(0, '127.0.0.1', r));
-    const mockUrl = `http://127.0.0.1:${mockResend.address().port}`;
+    // 2. Weak password (letters only or digits only)
+    const weak = await jsonApi('/api/auth/register', {
+      method: 'POST',
+      body: {
+        email: 'weak@gmail.com',
+        password: 'onlyletters',
+        confirmPassword: 'onlyletters',
+        username: 'WeakPass'
+      }
+    });
+    assert.equal(weak.status, 400);
+    assert.equal(weak.data.code, 'WEAK_PASSWORD');
 
-    try {
-      // 1. Unconfigured provider must fail honestly with 503 (never fake "sent")
-      delete process.env.MINIGAMES_TEST_CONSOLE_OTP;
-      delete process.env.RESEND_API_KEY;
-      delete process.env.SMTP_HOST;
+    // 3. Direct registration creates active session immediately without email provider
+    const direct = await jsonApi('/api/auth/register', {
+      method: 'POST',
+      body: {
+        email: 'DirectUser@Gmail.com',
+        password: 'Arcade2026!',
+        confirmPassword: 'Arcade2026!',
+        username: 'DirectUser'
+      }
+    });
+    assert.equal(direct.status, 201);
+    assert.ok(direct.data.token);
+    assert.equal(direct.data.user.email, 'directuser@gmail.com');
 
-      const unconf = await jsonApi('/api/auth/register', {
-        method: 'POST',
-        body: { email: 'unconf@gmail.com', password: 'Password123!', username: 'SinMail' }
-      });
-      assert.equal(unconf.status, 503);
-      assert.equal(unconf.data.code, 'EMAIL_PROVIDER_NOT_CONFIGURED');
-      assert.equal(unconf.data.deliveryStatus, 'unconfigured');
-      assert.equal(unconf.data.accountStatus, 'pending_verification');
+    // 4. Duplicate email rejected
+    const dup = await jsonApi('/api/auth/register', {
+      method: 'POST',
+      body: {
+        email: 'directuser@gmail.com',
+        password: 'AnotherPass1!',
+        confirmPassword: 'AnotherPass1!',
+        username: 'DupUser'
+      }
+    });
+    assert.equal(dup.status, 409);
+    assert.equal(dup.data.code, 'EMAIL_ALREADY_EXISTS');
 
-      // 2. Rejected by external email provider -> 502 EMAIL_DELIVERY_REJECTED + account stays pending
-      process.env.RESEND_API_KEY = 're_test_live';
-      process.env.SMTP_FROM = 'Mini-Games <noreply@minigames.test>';
-      process.env.RESEND_API_BASE_URL = mockUrl;
-      resendMode = 'reject';
+    // 5. Logout + /api/auth/me returns null + re-login works
+    const out = await jsonApi('/api/auth/logout', { method: 'POST', token: direct.data.token });
+    assert.equal(out.status, 200);
+    const afterOut = await jsonApi('/api/auth/me', { token: direct.data.token });
+    assert.equal(afterOut.data.user, null);
 
-      const rej = await jsonApi('/api/auth/register', {
-        method: 'POST',
-        body: { email: 'rej@gmail.com', password: 'Password123!', username: 'Rechazo' }
-      });
-      assert.equal(rej.status, 502);
-      assert.equal(rej.data.code, 'EMAIL_DELIVERY_REJECTED');
-      assert.equal(rej.data.deliveryStatus, 'rejected');
-      assert.equal(rej.data.accountStatus, 'pending_verification');
+    const badLogin = await jsonApi('/api/auth/login', {
+      method: 'POST',
+      body: { email: 'directuser@gmail.com', password: 'WrongPassword1' }
+    });
+    assert.equal(badLogin.status, 401);
 
-      // 3. Accepted by external Resend HTTP API -> captures real OTP email, verifies cooldown & email match
-      resendMode = 'accept';
-      lastEmailPayload = null;
-      const sent = await jsonApi('/api/auth/register', {
-        method: 'POST',
-        body: { email: 'RealUser@Gmail.com', password: 'Password123!', username: 'RealUser' }
-      });
-      assert.equal(sent.status, 201);
-      assert.equal(sent.data.deliveryStatus, 'sent');
-      assert.equal(sent.data.accountStatus, 'pending_verification');
-      assert.equal(sent.data.email, 'realuser@gmail.com');
-      assert.equal(sent.data.devOtpHint, undefined);
-      assert.ok(lastEmailPayload);
-      assert.deepEqual(lastEmailPayload.to, ['realuser@gmail.com']);
+    const relogin = await jsonApi('/api/auth/login', {
+      method: 'POST',
+      body: { email: 'directuser@gmail.com', password: 'Arcade2026!' }
+    });
+    assert.equal(relogin.status, 200);
+    assert.ok(relogin.data.token);
+    assert.equal(relogin.data.user.email, 'directuser@gmail.com');
 
-      const otpMatch = String(lastEmailPayload.text || '').match(/\b(\d{6})\b/);
-      assert.ok(otpMatch, 'OTP 6-digit token must be in email body');
-      const capturedOtp = otpMatch[1];
+    // 6. Legacy orphaned account (email_verified = 0, no sessions) can log in directly,
+    //    or be reclaimed by exact password owner, while blocking strangers
+    const { hashPassword } = await import('../server/security.js');
+    const now = new Date().toISOString();
+    getDb()
+      .prepare(
+        `INSERT INTO users (id, public_id, tag, email, email_verified, password_hash, username, created_at, updated_at)
+         VALUES ('usr_legacy_1', 'MG-LEG001', '7788', 'legacy@gmail.com', 0, ?, 'LegacyUser', ?, ?)`
+      )
+      .run(hashPassword('LegacyPass99'), now, now);
 
-      // Immediate resend must hit 60s cooldown (429 OTP_COOLDOWN with retryAfterSec)
-      const cooldownHit = await jsonApi('/api/auth/request-otp', {
-        method: 'POST',
-        body: { email: 'realuser@gmail.com', purpose: 'verify_email' }
-      });
-      assert.equal(cooldownHit.status, 429);
-      assert.equal(cooldownHit.data.code, 'OTP_COOLDOWN');
-      assert.ok(cooldownHit.data.retryAfterSec >= 1);
+    const strangerAttempt = await jsonApi('/api/auth/register', {
+      method: 'POST',
+      body: {
+        email: 'legacy@gmail.com',
+        password: 'HijackPassword1',
+        confirmPassword: 'HijackPassword1',
+        username: 'Hijacker'
+      }
+    });
+    assert.equal(strangerAttempt.status, 409);
 
-      // Verifying against a DIFFERENT email must be rejected
-      const wrongEmail = await jsonApi('/api/auth/verify-otp', {
-        method: 'POST',
-        body: { email: 'other@gmail.com', code: capturedOtp, purpose: 'verify_email' }
-      });
-      assert.equal(wrongEmail.status, 400);
+    const legacyLogin = await jsonApi('/api/auth/login', {
+      method: 'POST',
+      body: { email: 'legacy@gmail.com', password: 'LegacyPass99' }
+    });
+    assert.equal(legacyLogin.status, 200);
+    assert.equal(legacyLogin.data.user.publicId, 'MG-LEG001');
 
-      // Verifying with normalized registration email succeeds
-      const okVer = await jsonApi('/api/auth/verify-otp', {
-        method: 'POST',
-        body: { email: 'realuser@gmail.com', code: capturedOtp, purpose: 'verify_email' }
-      });
-      assert.equal(okVer.status, 200);
-      assert.equal(okVer.data.user.emailVerified, true);
+    // 7. Password recovery works without marking emailVerified=true
+    const forgot = await jsonApi('/api/auth/forgot-password', {
+      method: 'POST',
+      body: { email: 'directuser@gmail.com' }
+    });
+    assert.equal(forgot.status, 200);
+    assert.match(forgot.data.devOtpHint, /^\d{6}$/);
 
-      // Expired OTP check
-      const expReg = await jsonApi('/api/auth/register', {
-        method: 'POST',
-        body: { email: 'expired@gmail.com', password: 'Password123!', username: 'ExpUser' }
-      });
-      assert.equal(expReg.status, 201);
-      const expOtp = String(lastEmailPayload.text || '').match(/\b(\d{6})\b/)[1];
-      getDb().prepare('UPDATE otp_codes SET expires_at = ? WHERE email = ?').run(Date.now() - 1000, 'expired@gmail.com');
-      const expCheck = await jsonApi('/api/auth/verify-otp', {
-        method: 'POST',
-        body: { email: 'expired@gmail.com', code: expOtp, purpose: 'verify_email' }
-      });
-      assert.equal(expCheck.status, 400);
-      assert.match(expCheck.data.message, /expir/i);
-    } finally {
-      await new Promise((r) => mockResend.close(r));
-      if (prevConsole) process.env.MINIGAMES_TEST_CONSOLE_OTP = prevConsole;
-      else delete process.env.MINIGAMES_TEST_CONSOLE_OTP;
-      if (prevResendKey) process.env.RESEND_API_KEY = prevResendKey;
-      else delete process.env.RESEND_API_KEY;
-      if (prevFrom) process.env.SMTP_FROM = prevFrom;
-      else delete process.env.SMTP_FROM;
-      if (prevBase) process.env.RESEND_API_BASE_URL = prevBase;
-      else delete process.env.RESEND_API_BASE_URL;
-    }
+    const reset = await jsonApi('/api/auth/reset-password', {
+      method: 'POST',
+      body: { email: 'directuser@gmail.com', code: forgot.data.devOtpHint, newPassword: 'NewArcade2026!' }
+    });
+    assert.equal(reset.status, 200);
+    const loginNew = await jsonApi('/api/auth/login', {
+      method: 'POST',
+      body: { email: 'directuser@gmail.com', password: 'NewArcade2026!' }
+    });
+    assert.equal(loginNew.status, 200);
+    assert.equal(loginNew.data.user.emailVerified, false);
   });
 
-  it('completes Supabase Auth signUp -> resend -> verifyOtp -> /api/auth/supabase-exchange end-to-end', async () => {
+  it('completes Supabase Auth signUp (Confirm Email OFF) -> /api/auth/supabase-exchange immediately without OTP', async () => {
     const prevSbUrl = process.env.SUPABASE_URL;
     const prevSbAnon = process.env.SUPABASE_ANON_KEY;
 
-    let verifiedPayload = null;
-    let resendPayload = null;
     const sbUserId = '550e8400-e29b-41d4-a716-446655440000';
-    const issuedOtp = '492817';
-
     const mockGoTrue = http.createServer((req, res) => {
       const chunks = [];
       req.on('data', (c) => chunks.push(c));
@@ -725,49 +719,25 @@ describe('Mini-Games Platform Integration Suite', () => {
         const body = bodyStr ? JSON.parse(bodyStr) : {};
 
         if (req.url === '/auth/v1/signup' && req.method === 'POST') {
+          // Confirm Email OFF returns an active session directly
           res.writeHead(200, { 'Content-Type': 'application/json' });
           res.end(
             JSON.stringify({
-              id: sbUserId,
-              email: body.email,
-              confirmation_sent_at: new Date().toISOString(),
-              identities: [{ id: sbUserId }]
-            })
-          );
-          return;
-        }
-        if (req.url === '/auth/v1/resend' && req.method === 'POST') {
-          resendPayload = body;
-          res.writeHead(200, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ message_id: 'sb_resend_1' }));
-          return;
-        }
-        if (req.url === '/auth/v1/verify' && req.method === 'POST') {
-          verifiedPayload = body;
-          if (body.token !== issuedOtp || body.type !== 'signup') {
-            res.writeHead(401, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ error_description: 'Token has expired or is invalid' }));
-            return;
-          }
-          res.writeHead(200, { 'Content-Type': 'application/json' });
-          res.end(
-            JSON.stringify({
-              access_token: 'sb_access_valid_jwt',
+              access_token: 'sb_direct_access_jwt',
               token_type: 'bearer',
               expires_in: 3600,
               refresh_token: 'sb_refresh_1',
               user: {
                 id: sbUserId,
                 email: body.email,
-                email_confirmed_at: new Date().toISOString(),
-                user_metadata: { username: 'SupaTester' }
+                user_metadata: body.data || { username: 'SupaDirect' }
               }
             })
           );
           return;
         }
         if (req.url === '/auth/v1/user' && req.method === 'GET') {
-          if (req.headers.authorization !== 'Bearer sb_access_valid_jwt') {
+          if (req.headers.authorization !== 'Bearer sb_direct_access_jwt') {
             res.writeHead(401, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ error: 'Invalid token' }));
             return;
@@ -776,9 +746,9 @@ describe('Mini-Games Platform Integration Suite', () => {
           res.end(
             JSON.stringify({
               id: sbUserId,
-              email: 'sbuser@gmail.com',
-              email_confirmed_at: new Date().toISOString(),
-              user_metadata: { username: 'SupaTester' }
+              email: 'sbdirect@gmail.com',
+              email_confirmed_at: null,
+              user_metadata: { username: 'SupaDirect' }
             })
           );
           return;
@@ -799,39 +769,25 @@ describe('Mini-Games Platform Integration Suite', () => {
       });
 
       const su = await sb.auth.signUp({
-        email: 'sbuser@gmail.com',
+        email: 'sbdirect@gmail.com',
         password: 'Password123!',
-        options: { data: { username: 'SupaTester' } }
+        options: { data: { username: 'SupaDirect' } }
       });
       assert.equal(su.error, null);
-      assert.equal(su.data.user.email, 'sbuser@gmail.com');
+      assert.ok(su.data.session?.access_token);
 
-      const rs = await sb.auth.resend({ type: 'signup', email: 'sbuser@gmail.com' });
-      assert.equal(rs.error, null);
-      assert.equal(resendPayload.type, 'signup');
-      assert.equal(resendPayload.email, 'sbuser@gmail.com');
-
-      const vo = await sb.auth.verifyOtp({
-        email: 'sbuser@gmail.com',
-        token: issuedOtp,
-        type: 'signup'
-      });
-      assert.equal(vo.error, null);
-      assert.equal(verifiedPayload.type, 'signup');
-      assert.equal(verifiedPayload.token, issuedOtp);
-      assert.equal(verifiedPayload.email, 'sbuser@gmail.com');
-
+      // Exchange must succeed even when email_confirmed_at is null (Confirm Email OFF)
       const ex = await jsonApi('/api/auth/supabase-exchange', {
         method: 'POST',
         body: {
-          accessToken: vo.data.session.access_token,
-          guestMigration: { guestId: 'gst_sb_1', favoriteGames: ['chess'] }
+          accessToken: su.data.session.access_token,
+          guestMigration: { guestId: 'gst_sb_direct', favoriteGames: ['chess'] }
         }
       });
       assert.equal(ex.status, 200);
-      assert.equal(ex.data.user.email, 'sbuser@gmail.com');
-      assert.equal(ex.data.user.emailVerified, true);
-      assert.equal(ex.data.user.username, 'SupaTester');
+      assert.equal(ex.data.user.email, 'sbdirect@gmail.com');
+      assert.equal(ex.data.user.emailVerified, false);
+      assert.equal(ex.data.user.username, 'SupaDirect');
     } finally {
       await new Promise((r) => mockGoTrue.close(r));
       if (prevSbUrl) process.env.SUPABASE_URL = prevSbUrl;
