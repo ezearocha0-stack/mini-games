@@ -1,16 +1,37 @@
 {
   "id": "/",
-  "name": "Mini-Games · Arcade Crossplay P2P",
+  "name": "Mini-Games · Plataforma Gaming Crossplay P2P",
   "short_name": "Mini-Games",
-  "description": "Hub de minijuegos multijugador P2P en tiempo real y por turnos para PC y Android.",
+  "description": "Plataforma multijugador Crossplay P2P para PC y Android con salas, amigos, chat, voz WebRTC y ranking.",
   "lang": "es",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
+  "display_override": ["standalone", "minimal-ui"],
   "orientation": "any",
-  "background_color": "#12161b",
-  "theme_color": "#12161b",
+  "background_color": "#0b0f15",
+  "theme_color": "#0b0f15",
   "categories": ["games", "entertainment"],
+  "shortcuts": [
+    {
+      "name": "Jugar ahora",
+      "short_name": "Jugar",
+      "url": "/#jugar",
+      "icons": [{ "src": "/icon-192.png", "sizes": "192x192", "type": "image/png" }]
+    },
+    {
+      "name": "Salas Crossplay",
+      "short_name": "Salas",
+      "url": "/#salas",
+      "icons": [{ "src": "/icon-192.png", "sizes": "192x192", "type": "image/png" }]
+    },
+    {
+      "name": "Ranking Global",
+      "short_name": "Ranking",
+      "url": "/#ranking",
+      "icons": [{ "src": "/icon-192.png", "sizes": "192x192", "type": "image/png" }]
+    }
+  ],
   "icons": [
     {
       "src": "/icon-192.png",

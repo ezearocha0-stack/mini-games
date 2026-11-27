@@ -3,12 +3,26 @@ import Peer from 'peerjs';
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 const PEER_PREFIX = 'mgxplay-v1-';
 
-const ICE_SERVERS = [
+const DEFAULT_ICE_SERVERS = [
   { urls: 'stun:stun.l.google.com:19302' },
   { urls: 'stun:stun1.l.google.com:19302' },
   { urls: 'stun:stun2.l.google.com:19302' },
   { urls: 'stun:stun.cloudflare.com:3478' }
 ];
+const RECONNECT_STORAGE_KEY = 'mg_room_reconnect_v1';
+
+async function fetchIceServers() {
+  try {
+    const res = await fetch('/api/rtc/ice');
+    if (res.ok && (res.headers.get('content-type') || '').includes('application/json')) {
+      const data = await res.json();
+      if (Array.isArray(data.iceServers) && data.iceServers.length > 0) {
+        return data.iceServers;
+      }
+    }
+  } catch {}
+  return DEFAULT_ICE_SERVERS;
+}
 
 export function detectDeviceType() {
   const ua = navigator.userAgent || '';
@@ -41,16 +55,18 @@ function getServerWsUrl() {
 }
 
 export class P2PSession {
-  constructor({ getLocalProfile, onStatusChange, onMessage, onPeerProfile, onPingUpdate }) {
+  constructor({ getLocalProfile, onStatusChange, onMessage, onPeerProfile, onPingUpdate, onSystemEvent }) {
     this.getLocalProfile = getLocalProfile;
     this.onStatusChange = onStatusChange;
     this.onMessage = onMessage;
     this.onPeerProfile = onPeerProfile;
     this.onPingUpdate = onPingUpdate;
+    this.onSystemEvent = onSystemEvent;
 
     this.transport = null; // 'ws' | 'webrtc' | null
     this.ws = null;
     this.wsPaired = false;
+    this.iceServers = DEFAULT_ICE_SERVERS;
 
     // Optional direct UDP WebRTC fast-lane negotiated over /ws
     this.rtcPc = null;
@@ -62,11 +78,13 @@ export class P2PSession {
     this.conn = null;
     this.fastPeerConn = null;
 
-    this.role = null; // 'host' | 'guest' | null
+    this.role = null; // 'host' | 'guest' | 'spectator' | null
     this.roomCode = null;
+    this.reconnectToken = null;
     this.status = 'idle';
     this.remoteProfile = null;
     this.rttMs = null;
+    this.lastPongAt = 0;
     this.pingTimer = null;
     this.retryCount = 0;
   }
@@ -104,16 +122,17 @@ export class P2PSession {
     });
   }
 
-  async createRoom(preferredCode = null) {
+  async createRoom(preferredCode = null, options = {}) {
     this.cleanupTransports();
     this.role = 'host';
     this.roomCode = preferredCode || generateRoomCode();
     this.remoteProfile = null;
     this.rttMs = null;
     this.setStatus('creating', 'Creando sala…');
+    this.iceServers = await fetchIceServers();
 
     try {
-      const code = await this.createRoomViaWebSocket(this.roomCode);
+      const code = await this.createRoomViaWebSocket(this.roomCode, options);
       return code;
     } catch {
       return this.createRoomViaPeerJs(this.roomCode);
@@ -132,6 +151,7 @@ export class P2PSession {
     this.remoteProfile = null;
     this.rttMs = null;
     this.setStatus('joining', `Conectando a ${code}…`);
+    this.iceServers = await fetchIceServers();
 
     try {
       const joinedCode = await this.joinRoomViaWebSocket(code);
@@ -142,6 +162,63 @@ export class P2PSession {
         throw wsErr;
       }
       return this.joinRoomViaPeerJs(code);
+    }
+  }
+
+  saveReconnectSession() {
+    if (!this.roomCode || !this.reconnectToken) return;
+    try {
+      sessionStorage.setItem(
+        RECONNECT_STORAGE_KEY,
+        JSON.stringify({ code: this.roomCode, token: this.reconnectToken, ts: Date.now() })
+      );
+    } catch {}
+  }
+
+  clearReconnectSession() {
+    try {
+      sessionStorage.removeItem(RECONNECT_STORAGE_KEY);
+    } catch {}
+  }
+
+  attemptAutoReconnect() {
+    if (this.status === 'connected' || this.status === 'waiting') return false;
+    try {
+      const saved = JSON.parse(sessionStorage.getItem(RECONNECT_STORAGE_KEY) || 'null');
+      if (!saved || !saved.code || !saved.token || Date.now() - saved.ts > 45_000) return false;
+      this.setStatus('reconnecting', `Reconectando a ${saved.code}…`);
+      const ws = new WebSocket(getServerWsUrl());
+      ws.addEventListener('open', () => {
+        const authToken = localStorage.getItem('mg_session_token_v1') || '';
+        ws.send(JSON.stringify({ sys: 'AUTH_HELLO', token: authToken, profile: this.getLocalProfile() }));
+        ws.send(JSON.stringify({ sys: 'RECONNECT_ROOM', code: saved.code, reconnectToken: saved.token }));
+      });
+      ws.addEventListener('message', (ev) => {
+        let msg;
+        try {
+          msg = JSON.parse(ev.data);
+        } catch {
+          return;
+        }
+        if (msg.sys === 'JOIN_OK') {
+          this.transport = 'ws';
+          this.ws = ws;
+          this.wsPaired = true;
+          this.roomCode = msg.code;
+          this.role = msg.role || this.role;
+          this.reconnectToken = msg.reconnectToken || saved.token;
+          this.setStatus('connected', 'Reconectado');
+          this.send({ type: 'HELLO', profile: this.getLocalProfile() });
+          this.startPingLoop();
+        } else if (msg.sys === 'PACKET' && msg.payload) {
+          this.handleIncomingAppPacket(msg.payload);
+        } else if (msg.sys === 'RTC_SIGNAL') {
+          this.handleRtcSignal(msg.signal);
+        }
+      });
+      return true;
+    } catch {
+      return false;
     }
   }
 
@@ -169,7 +246,7 @@ export class P2PSession {
     if (typeof RTCPeerConnection === 'undefined') return null;
     this.closeRtcFastLane();
 
-    const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
+    const pc = new RTCPeerConnection({ iceServers: this.iceServers || DEFAULT_ICE_SERVERS });
     this.rtcPc = pc;
 
     pc.onicecandidate = (ev) => {
@@ -275,7 +352,7 @@ export class P2PSession {
   // =========================================================================
   // Transport A: Render / Node WebSocket (/ws) + Auto UDP Fast-Lane
   // =========================================================================
-  createRoomViaWebSocket(preferredCode) {
+  createRoomViaWebSocket(preferredCode, options = {}) {
     return new Promise((resolve, reject) => {
       let settled = false;
       let ws;
@@ -297,7 +374,22 @@ export class P2PSession {
       }, 2200);
 
       ws.addEventListener('open', () => {
-        ws.send(JSON.stringify({ sys: 'CREATE_ROOM', code: preferredCode }));
+        const profile = this.getLocalProfile();
+        const token = localStorage.getItem('mg_session_token_v1') || '';
+        ws.send(JSON.stringify({ sys: 'AUTH_HELLO', token, profile }));
+        ws.send(
+          JSON.stringify({
+            sys: 'CREATE_ROOM',
+            code: preferredCode,
+            clientId: profile?.id,
+            profile,
+            visibility: options.visibility || 'private',
+            title: options.title || '',
+            gameId: options.gameId || 'air-hockey',
+            maxMembers: options.maxMembers || 2,
+            allowSpectators: options.allowSpectators !== false
+          })
+        );
       });
 
       ws.addEventListener('message', (ev) => {
@@ -314,6 +406,8 @@ export class P2PSession {
           this.ws = ws;
           this.wsPaired = false;
           this.roomCode = msg.code;
+          this.reconnectToken = msg.reconnectToken || null;
+          this.saveReconnectSession();
           this.setStatus('waiting', `Sala ${this.roomCode} lista`);
           if (!settled) {
             settled = true;
@@ -336,6 +430,12 @@ export class P2PSession {
           return;
         }
 
+        if (msg.sys === 'HOST_PROMOTED') {
+          this.role = 'host';
+          this.setStatus(this.wsPaired ? 'connected' : 'waiting', 'Ahora eres el anfitrión');
+          return;
+        }
+
         if (msg.sys === 'GUEST_LEFT') {
           this.stopPingLoop();
           this.closeRtcFastLane();
@@ -344,6 +444,11 @@ export class P2PSession {
           this.rttMs = null;
           this.setStatus('waiting', `Rival desconectado · Sala ${this.roomCode} abierta`);
           this.onMessage?.({ type: 'PEER_LEFT' });
+          return;
+        }
+
+        if (msg.sys === 'NOTIFICATION' || msg.sys === 'PRESENCE_UPDATE' || msg.sys === 'CHAT_MESSAGE') {
+          this.onSystemEvent?.(msg);
           return;
         }
 
@@ -399,7 +504,10 @@ export class P2PSession {
       }, 2200);
 
       ws.addEventListener('open', () => {
-        ws.send(JSON.stringify({ sys: 'JOIN_ROOM', code }));
+        const profile = this.getLocalProfile();
+        const token = localStorage.getItem('mg_session_token_v1') || '';
+        ws.send(JSON.stringify({ sys: 'AUTH_HELLO', token, profile }));
+        ws.send(JSON.stringify({ sys: 'JOIN_ROOM', code, clientId: profile?.id, profile }));
       });
 
       ws.addEventListener('message', (ev) => {
@@ -430,6 +538,9 @@ export class P2PSession {
           this.ws = ws;
           this.wsPaired = true;
           this.roomCode = msg.code;
+          this.role = msg.role || 'guest';
+          this.reconnectToken = msg.reconnectToken || null;
+          this.saveReconnectSession();
           this.setStatus('connected', 'Conectado en tiempo real');
           this.send({ type: 'HELLO', profile: this.getLocalProfile() });
           this.startPingLoop();
@@ -445,13 +556,31 @@ export class P2PSession {
           return;
         }
 
+        if (msg.sys === 'HOST_PROMOTED') {
+          this.role = 'host';
+          this.setStatus('connected', 'Ahora eres el anfitrión');
+          return;
+        }
+
+        if (msg.sys === 'KICKED') {
+          this.leave();
+          this.onSystemEvent?.({ sys: 'KICKED', message: msg.message });
+          return;
+        }
+
         if (msg.sys === 'HOST_LEFT' || msg.sys === 'PEER_CLOSED') {
           this.stopPingLoop();
           this.closeRtcFastLane();
           this.wsPaired = false;
           this.rttMs = null;
+          this.clearReconnectSession();
           this.setStatus('disconnected', 'El anfitrión cerró la sala.');
           this.onMessage?.({ type: 'PEER_LEFT' });
+          return;
+        }
+
+        if (msg.sys === 'NOTIFICATION' || msg.sys === 'PRESENCE_UPDATE' || msg.sys === 'CHAT_MESSAGE') {
+          this.onSystemEvent?.(msg);
           return;
         }
 
@@ -498,7 +627,7 @@ export class P2PSession {
 
       const peer = new Peer(peerId, {
         debug: 0,
-        config: { iceServers: ICE_SERVERS }
+        config: { iceServers: this.iceServers || DEFAULT_ICE_SERVERS }
       });
       this.peer = peer;
 
@@ -568,7 +697,7 @@ export class P2PSession {
 
       const peer = new Peer({
         debug: 0,
-        config: { iceServers: ICE_SERVERS }
+        config: { iceServers: this.iceServers || DEFAULT_ICE_SERVERS }
       });
       this.peer = peer;
 
@@ -673,7 +802,8 @@ export class P2PSession {
     }
 
     if (packet.type === 'PONG' && typeof packet.ts === 'number') {
-      this.rttMs = Math.max(1, Math.round(performance.now() - packet.ts));
+      this.lastPongAt = performance.now();
+      this.rttMs = Math.max(1, Math.round(this.lastPongAt - packet.ts));
       this.onPingUpdate?.(this.rttMs);
       return;
     }
@@ -763,13 +893,32 @@ export class P2PSession {
 
   startPingLoop() {
     this.stopPingLoop();
+    this.lastPongAt = performance.now();
     const firePing = () => {
       if (this.isConnected()) {
-        this.sendFast({ type: 'PING', ts: performance.now() });
+        const now = performance.now();
+        if (now - this.lastPongAt > 4500) {
+          // Reliable fallback if fast channel is transiently stalled
+          this.send({ type: 'PING', ts: now });
+        } else {
+          this.sendFast({ type: 'PING', ts: now });
+        }
       }
     };
     firePing();
     this.pingTimer = setInterval(firePing, 2000);
+  }
+
+  sendRoomControl(sys, data = {}) {
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      try {
+        this.ws.send(JSON.stringify({ sys, ...data }));
+        return true;
+      } catch {
+        return false;
+      }
+    }
+    return false;
   }
 
   stopPingLoop() {
@@ -812,8 +961,10 @@ export class P2PSession {
 
   leave() {
     this.cleanupTransports();
+    this.clearReconnectSession();
     this.role = null;
     this.roomCode = null;
+    this.reconnectToken = null;
     this.remoteProfile = null;
     this.rttMs = null;
     this.setStatus('idle', '');

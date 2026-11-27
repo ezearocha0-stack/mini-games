@@ -1,17 +1,17 @@
 <!DOCTYPE html>
-<html lang="es">
+<html lang="es" data-theme="dark" data-accent="amber" data-scale="normal">
   <head>
     <meta charset="UTF-8" />
     <meta
       name="viewport"
-      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"
+      content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content"
     />
-    <title>Mini-Games · Arcade Multijugador P2P (PC + Android)</title>
+    <title>Mini-Games · Plataforma Gaming Crossplay P2P (PC + Android)</title>
     <meta
       name="description"
-      content="Colección de minijuegos multijugador P2P en tiempo real y por turnos para jugar entre PC y Android sin servidor: Air Hockey, Conecta 4 y Tres en Raya Infinito."
+      content="Plataforma gaming multijugador P2P Crossplay para PC y Android: Neo Air Hockey, Conecta 4 Táctico, Tres en Raya Infinito, amigos, chat, voz WebRTC y ranking competitivo."
     />
-    <meta name="theme-color" content="#12161b" />
+    <meta name="theme-color" content="#0b0f15" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
@@ -28,318 +28,155 @@
       rel="stylesheet"
     />
     <link rel="stylesheet" href="/src/styles/index.css" />
+    <link rel="stylesheet" href="/src/styles/platform.css" />
+    <link rel="stylesheet" href="/src/styles/games.css" />
   </head>
   <body>
-    <div class="grain-overlay" aria-hidden="true"></div>
-
     <div id="app" class="app-shell">
-      <!-- Top Bar -->
-      <header class="topbar" role="banner">
-        <button id="btn-home-brand" class="brand-btn" type="button" aria-label="Volver al inicio">
-          <img src="/icon-192.png" alt="" class="brand-icon" width="34" height="34" />
-          <span class="brand-copy">
-            <span class="brand-name">MINI·GAMES</span>
-            <span class="brand-tag">PC ↔ ANDROID P2P</span>
-          </span>
+      <!-- PC Left Sidebar -->
+      <aside id="pc-sidebar" class="pc-sidebar" aria-label="Navegación principal">
+        <div class="sidebar-brand-row">
+          <button id="btn-home-brand" class="brand-btn" type="button" aria-label="Ir a Inicio">
+            <img src="/icon-192.png" alt="" class="brand-icon" width="32" height="32" />
+            <span class="brand-copy">
+              <span class="brand-name">MINI·GAMES</span>
+              <span class="brand-tag">PC ↔ ANDROID P2P</span>
+            </span>
+          </button>
+          <button id="btn-toggle-sidebar" class="icon-btn" type="button" title="Contraer barra lateral" aria-label="Contraer barra lateral">
+            ⇄
+          </button>
+        </div>
+
+        <button id="btn-sidebar-create-room" type="button" class="btn btn-primary btn-block">
+          <span>+</span>
+          <span class="sidebar-cta-label">Crear Sala P2P</span>
         </button>
 
-        <div class="topbar-actions">
-          <button
-            id="btn-install-pwa"
-            class="btn btn-subtle btn-compact hidden"
-            type="button"
-            title="Instalar aplicación a pantalla completa"
-          >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-              <path d="M12 3v12m0 0 4-4m-4 4-4-4M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" stroke-linecap="round" stroke-linejoin="round"/>
-            </svg>
-            <span>Instalar App</span>
+        <nav class="sidebar-nav" id="sidebar-nav" aria-label="Secciones de la plataforma">
+          <button type="button" class="nav-item active" data-nav="inicio"><span>🏠</span><span class="nav-label">Inicio</span></button>
+          <button type="button" class="nav-item" data-nav="juegos"><span>🎮</span><span class="nav-label">Juegos</span></button>
+          <button type="button" class="nav-item" data-nav="jugar"><span>⚡</span><span class="nav-label">Jugar</span></button>
+          <button type="button" class="nav-item" data-nav="salas"><span>🛰️</span><span class="nav-label">Salas</span></button>
+          <button type="button" class="nav-item" data-nav="amigos">
+            <span>👥</span><span class="nav-label">Amigos</span>
+            <span id="badge-nav-friends" class="nav-badge hidden">0</span>
           </button>
-
-          <button
-            id="btn-fullscreen"
-            class="icon-btn"
-            type="button"
-            aria-label="Pantalla completa"
-            title="Alternar pantalla completa"
-          >
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-              <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3" stroke-linecap="round" stroke-linejoin="round"/>
-            </svg>
+          <button type="button" class="nav-item" data-nav="mensajes">
+            <span>💬</span><span class="nav-label">Mensajes</span>
+            <span id="badge-nav-messages" class="nav-badge hidden">0</span>
           </button>
+          <button type="button" class="nav-item" data-nav="ranking"><span>🏆</span><span class="nav-label">Ranking</span></button>
+          <button type="button" class="nav-item" data-nav="perfil"><span>🪪</span><span class="nav-label">Perfil</span></button>
+          <button type="button" class="nav-item" data-nav="ajustes"><span>⚙️</span><span class="nav-label">Ajustes</span></button>
+        </nav>
 
-          <button
-            id="btn-toggle-sound"
-            class="icon-btn"
-            type="button"
-            aria-label="Activar o silenciar sonido"
-            title="Sonido"
-          >
-            <svg id="icon-sound-on" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-              <path d="M11 5 6 9H2v6h4l5 4V5Z" stroke-linecap="round" stroke-linejoin="round"/>
-              <path d="M15.54 8.46a5 5 0 0 1 0 7.07M19.07 4.93a10 10 0 0 1 0 14.14" stroke-linecap="round"/>
-            </svg>
-            <svg id="icon-sound-off" class="hidden" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-              <path d="M11 5 6 9H2v6h4l5 4V5Z" stroke-linecap="round" stroke-linejoin="round"/>
-              <path d="m22 9-6 6m0-6 6 6" stroke-linecap="round"/>
-            </svg>
-          </button>
-
-          <button
-            id="btn-edit-profile"
-            class="profile-chip"
-            type="button"
-            title="Cambiar tu apodo"
-          >
-            <span class="profile-dot" aria-hidden="true"></span>
-            <span id="label-player-name" class="profile-name">Jugador</span>
-            <span id="label-device-badge" class="device-tag">PC</span>
-          </button>
-        </div>
-      </header>
-
-      <!-- Persistent P2P Session Strip (shown whenever hosting, connecting, or connected) -->
-      <section id="session-strip" class="session-strip hidden" aria-label="Estado de sala multijugador">
-        <div class="session-strip-left">
-          <span id="session-status-dot" class="status-led waiting" aria-hidden="true"></span>
-          <div class="session-meta">
-            <span id="session-status-text" class="session-status-label">Esperando jugador…</span>
-            <span id="session-subtext" class="session-sublabel">Sala P2P directa</span>
+        <div id="sidebar-user-card" class="sidebar-footer-card" role="button" tabindex="0" aria-label="Abrir perfil o iniciar sesión">
+          <span id="sidebar-user-avatar" class="avatar sm" style="background:#f58229">🎮</span>
+          <div class="sidebar-user-meta">
+            <span id="sidebar-user-name" class="sidebar-user-name">Jugador</span>
+            <span id="sidebar-user-sub" class="sidebar-user-sub">Invitado</span>
           </div>
         </div>
+      </aside>
 
-        <div class="session-strip-center" id="session-score-pill">
-          <span id="session-p1-name" class="score-player p1">Tú</span>
-          <span class="score-tally">
-            <strong id="session-p1-wins">0</strong>
-            <span>:</span>
-            <strong id="session-p2-wins">0</strong>
-          </span>
-          <span id="session-p2-name" class="score-player p2">Rival</span>
-        </div>
-
-        <div class="session-strip-right">
-          <div class="reaction-bar" id="reaction-bar" role="group" aria-label="Reacciones rápidas">
-            <button type="button" class="reaction-btn" id="btn-react-gg" data-react="¡Buena!">¡Buena!</button>
-            <button type="button" class="reaction-btn" id="btn-react-fire" data-react="🔥">🔥</button>
-            <button type="button" class="reaction-btn" id="btn-react-clap" data-react="👏">👏</button>
-            <button type="button" class="reaction-btn" id="btn-react-wow" data-react="😮">😮</button>
+      <!-- Center Main Workspace -->
+      <div class="app-main-column">
+        <header class="topbar" role="banner">
+          <div class="topbar-left">
+            <button id="btn-mobile-brand" class="brand-btn mobile-brand-trigger" type="button" aria-label="Inicio">
+              <img src="/icon-192.png" alt="" class="brand-icon" width="30" height="30" />
+            </button>
+            <h1 id="topbar-view-title" class="topbar-view-title">Centro de Mando</h1>
           </div>
-          <button id="btn-open-invite" class="btn btn-subtle btn-compact" type="button">
-            Código / QR
-          </button>
-          <button id="btn-leave-room" class="btn btn-danger-ghost btn-compact" type="button">
-            Salir
-          </button>
+
+          <div class="topbar-actions">
+            <button id="btn-install-pwa" class="btn btn-subtle btn-compact hidden" type="button" title="Instalar PWA">
+              <span>⬇</span>
+              <span>Instalar</span>
+            </button>
+
+            <button id="btn-open-notifications" class="icon-btn" type="button" aria-label="Notificaciones" title="Notificaciones">
+              <span>🔔</span>
+              <span id="badge-notif-count" class="notif-count-dot hidden">0</span>
+            </button>
+
+            <button id="btn-fullscreen" class="icon-btn" type="button" aria-label="Pantalla completa" title="Pantalla completa">
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+            </button>
+
+            <button id="btn-toggle-sound" class="icon-btn" type="button" aria-label="Sonido" title="Sonido">
+              <svg id="icon-sound-on" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                <path d="M11 5 6 9H2v6h4l5 4V5Z" stroke-linecap="round" stroke-linejoin="round"/>
+                <path d="M15.54 8.46a5 5 0 0 1 0 7.07" stroke-linecap="round"/>
+              </svg>
+              <svg id="icon-sound-off" class="hidden" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                <path d="M11 5 6 9H2v6h4l5 4V5Z" stroke-linecap="round" stroke-linejoin="round"/>
+                <path d="m22 9-6 6m0-6 6 6" stroke-linecap="round"/>
+              </svg>
+            </button>
+
+            <button id="btn-toggle-social-rail" class="icon-btn" type="button" aria-label="Panel social" title="Panel social">
+              <span>👥</span>
+            </button>
+
+            <button id="btn-profile-chip" class="profile-chip" type="button" title="Perfil y Cuenta">
+              <span id="topbar-avatar" class="avatar sm" style="background:#f58229">🎮</span>
+              <span id="label-player-name" class="profile-chip-name">Jugador</span>
+            </button>
+          </div>
+        </header>
+
+        <!-- Network Offline / PWA Update Banner -->
+        <div id="system-banner" class="system-banner hidden" role="status">
+          <span id="system-banner-text"></span>
+          <button id="btn-system-banner-action" type="button" class="btn btn-primary btn-compact hidden">Actualizar</button>
         </div>
-      </section>
 
-      <!-- Main Workspace -->
-      <main id="main-content" class="main-content">
-        <!-- VIEW 1: HUB -->
-        <section id="view-hub" class="view-hub" aria-labelledby="hub-heading">
-          <div class="hub-intro">
-            <div class="hub-intro-copy">
-              <h1 id="hub-heading" class="hub-title">Juega al instante entre PC y Android.</h1>
-              <p class="hub-subtitle">
-                Conexión directa P2P sin cuentas ni servidores intermedios. Crea una sala, escanea el QR desde tu móvil o comparte el código de 5 letras.
-              </p>
-            </div>
-
-            <!-- Quick P2P Connection Panel -->
-            <div class="connect-panel" id="connect-panel">
-              <div class="connect-create">
-                <button id="btn-create-room" class="btn btn-primary btn-large" type="button">
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true">
-                    <path d="M12 5v14M5 12h14" stroke-linecap="round"/>
-                  </svg>
-                  <span>Crear Sala P2P</span>
-                </button>
-                <span class="connect-hint">Genera código + QR para el otro dispositivo</span>
-              </div>
-
-              <div class="connect-divider" aria-hidden="true"><span>o únete</span></div>
-
-              <form id="form-join-room" class="connect-join" autocomplete="off">
-                <label for="input-room-code" class="sr-only">Código de sala de 5 caracteres</label>
-                <input
-                  id="input-room-code"
-                  class="code-input"
-                  type="text"
-                   inputmode="text"
-                  maxlength="5"
-                  placeholder="CÓDIGO"
-                  aria-label="Código de sala"
-                  spellcheck="false"
-                />
-                <button id="btn-join-room" class="btn btn-secondary" type="submit">
-                  Entrar
-                </button>
-              </form>
+        <!-- Persistent P2P Session Strip -->
+        <section id="session-strip" class="session-strip hidden" aria-label="Sala activa">
+          <div class="session-strip-left">
+            <span id="session-status-dot" class="status-led waiting" aria-hidden="true"></span>
+            <div class="session-meta">
+              <span id="session-status-text" class="session-status-label">Esperando jugador…</span>
+              <span id="session-subtext" class="session-sublabel">Sala P2P</span>
             </div>
           </div>
 
-          <!-- Games Collection -->
-          <div class="games-section">
-            <div class="section-header">
-              <h2 class="section-title">Colección de juegos</h2>
-              <p id="hub-mode-indicator" class="section-caption">
-                Elige un juego para jugar Online P2P, 2 jugadores en pantalla compartida o contra la IA
-              </p>
+          <div class="session-strip-center" id="session-score-pill">
+            <span id="session-p1-name" class="score-player p1">Tú</span>
+            <span class="score-tally">
+              <strong id="session-p1-wins">0</strong>
+              <span>:</span>
+              <strong id="session-p2-wins">0</strong>
+            </span>
+            <span id="session-p2-name" class="score-player p2">Rival</span>
+          </div>
+
+          <div class="session-strip-right">
+            <div class="reaction-bar" id="reaction-bar" role="group" aria-label="Reacciones rápidas">
+              <button type="button" class="reaction-btn" data-react="¡Buena!">¡Buena!</button>
+              <button type="button" class="reaction-btn" data-react="🔥">🔥</button>
+              <button type="button" class="reaction-btn" data-react="👏">👏</button>
+              <button type="button" class="reaction-btn" data-react="😮">😮</button>
             </div>
-
-            <div class="games-grid">
-              <!-- Game 1: Air Hockey -->
-              <article class="game-card" id="card-air-hockey">
-                <div class="game-artwork" aria-hidden="true">
-                  <svg viewBox="0 0 280 148" class="art-svg">
-                    <rect x="14" y="12" width="252" height="124" rx="18" fill="#101419" stroke="rgba(240,236,228,0.12)" stroke-width="2"/>
-                    <line x1="140" y1="14" x2="140" y2="134" stroke="rgba(240,236,228,0.12)" stroke-width="2" stroke-dasharray="5 5"/>
-                    <circle cx="140" cy="74" r="22" fill="none" stroke="rgba(240,236,228,0.12)" stroke-width="2"/>
-                    <!-- P1 Striker (Amber) -->
-                    <circle cx="64" cy="86" r="19" fill="#f58229"/>
-                    <circle cx="64" cy="86" r="11" fill="#181e26" stroke="rgba(255,255,255,0.22)" stroke-width="2"/>
-                    <!-- Puck + motion trail -->
-                    <line x1="94" y1="78" x2="142" y2="58" stroke="rgba(245,130,41,0.35)" stroke-width="8" stroke-linecap="round"/>
-                    <circle cx="150" cy="54" r="10" fill="#f4f1ea"/>
-                    <!-- P2 Striker (Teal) -->
-                    <circle cx="216" cy="60" r="19" fill="#1ad1be"/>
-                    <circle cx="216" cy="60" r="11" fill="#181e26" stroke="rgba(255,255,255,0.22)" stroke-width="2"/>
-                  </svg>
-                  <span class="game-tempo-tag">60 FPS · Tiempo real</span>
-                </div>
-                <div class="game-body">
-                  <h3 class="game-title">Neo Air Hockey</h3>
-                  <p class="game-desc">
-                    Duelo físico a 7 goles con perspectiva simétrica: tú siempre defiendes tu portería inferior con ratón, teclado o control táctil directo.
-                  </p>
-                  <div class="game-controls-meta">
-                    <span>PC: Ratón / WASD</span>
-                    <span>Android: Arrastre táctil + vibración</span>
-                  </div>
-                  <div class="game-actions">
-                    <button
-                      id="btn-play-air-hockey"
-                      class="btn btn-primary btn-block"
-                      type="button"
-                      data-game="air-hockey"
-                    >
-                      Jugar Air Hockey
-                    </button>
-                  </div>
-                </div>
-              </article>
-
-              <!-- Game 2: Connect 4 -->
-              <article class="game-card" id="card-connect-four">
-                <div class="game-artwork" aria-hidden="true">
-                  <svg viewBox="0 0 280 148" class="art-svg">
-                    <rect x="46" y="14" width="188" height="120" rx="14" fill="#101419" stroke="rgba(240,236,228,0.12)" stroke-width="2"/>
-                    <!-- 5x3 visible mini rack sample -->
-                    <g transform="translate(68, 30)">
-                      <circle cx="16" cy="16" r="11" fill="#1b222b"/>
-                      <circle cx="48" cy="16" r="11" fill="#1b222b"/>
-                      <circle cx="80" cy="16" r="11" fill="#f58229"/>
-                      <circle cx="112" cy="16" r="11" fill="#1b222b"/>
-                      <circle cx="144" cy="16" r="11" fill="#1b222b"/>
-
-                      <circle cx="16" cy="46" r="11" fill="#1b222b"/>
-                      <circle cx="48" cy="46" r="11" fill="#f58229"/>
-                      <circle cx="80" cy="46" r="11" fill="#1ad1be"/>
-                      <circle cx="112" cy="46" r="11" fill="#1b2229"/>
-                      <circle cx="144" cy="46" r="11" fill="#1b222b"/>
-
-                      <circle cx="16" cy="76" r="11" fill="#f58229"/>
-                      <circle cx="48" cy="76" r="11" fill="#1ad1be"/>
-                      <circle cx="80" cy="76" r="11" fill="#1ad1be"/>
-                      <circle cx="112" cy="76" r="11" fill="#f58229"/>
-                      <circle cx="144" cy="76" r="11" fill="#1ad1be"/>
-                      <line x1="16" y1="76" x2="80" y2="16" stroke="#f4f1ea" stroke-width="3" stroke-linecap="round"/>
-                    </g>
-                  </svg>
-                  <span class="game-tempo-tag">Estrategia · 7×6</span>
-                </div>
-                <div class="game-body">
-                  <h3 class="game-title">Conecta 4 Táctico</h3>
-                  <p class="game-desc">
-                    Alinea cuatro fichas verticales, horizontales o diagonales antes que tu rival. Caída con rebote físico y vista previa de columna.
-                  </p>
-                  <div class="game-controls-meta">
-                    <span>PC: Clic o teclas 1–7</span>
-                    <span>Android: Toque por columna</span>
-                  </div>
-                  <div class="game-actions">
-                    <button
-                      id="btn-play-connect-four"
-                      class="btn btn-primary btn-block"
-                      type="button"
-                      data-game="connect-four"
-                    >
-                      Jugar Conecta 4
-                    </button>
-                  </div>
-                </div>
-              </article>
-
-              <!-- Game 3: Infinite Tic Tac Toe -->
-              <article class="game-card" id="card-tic-tac-toe">
-                <div class="game-artwork" aria-hidden="true">
-                  <svg viewBox="0 0 280 148" class="art-svg">
-                    <rect x="76" y="10" width="128" height="128" rx="16" fill="#101419" stroke="rgba(240,236,228,0.12)" stroke-width="2"/>
-                    <line x1="118" y1="24" x2="118" y2="124" stroke="rgba(240,236,228,0.14)" stroke-width="2.5" stroke-linecap="round"/>
-                    <line x1="162" y1="24" x2="162" y2="124" stroke="rgba(240,236,228,0.14)" stroke-width="2.5" stroke-linecap="round"/>
-                    <line x1="90" y1="57" x2="190" y2="57" stroke="rgba(240,236,228,0.14)" stroke-width="2.5" stroke-linecap="round"/>
-                    <line x1="90" y1="91" x2="190" y2="91" stroke="rgba(240,236,228,0.14)" stroke-width="2.5" stroke-linecap="round"/>
-                    <!-- X in amber -->
-                    <g stroke="#f58229" stroke-width="4" stroke-linecap="round">
-                      <line x1="96" y1="32" x2="110" y2="46"/>
-                      <line x1="110" y1="32" x2="96" y2="46"/>
-                      <line x1="133" y1="67" x2="147" y2="81"/>
-                      <line x1="147" y1="67" x2="133" y2="81"/>
-                    </g>
-                    <!-- Fading oldest X -->
-                    <g stroke="rgba(245,130,41,0.32)" stroke-width="3.5" stroke-linecap="round" stroke-dasharray="3 3">
-                      <line x1="169" y1="101" x2="183" y2="115"/>
-                      <line x1="183" y1="101" x2="169" y2="115"/>
-                    </g>
-                    <!-- O in teal -->
-                    <circle cx="176" cy="39" r="8.5" fill="none" stroke="#1ad1be" stroke-width="4"/>
-                    <circle cx="103" cy="74" r="8.5" fill="none" stroke="#1ad1be" stroke-width="4"/>
-                  </svg>
-                  <span class="game-tempo-tag">Sin empates · 3 Piezas</span>
-                </div>
-                <div class="game-body">
-                  <h3 class="game-title">Tres en Raya Infinito</h3>
-                  <p class="game-desc">
-                    Solo puedes mantener 3 marcas activas en el tablero: al colocar la cuarta, tu marca más antigua desaparece. Cero empates, pura táctica.
-                  </p>
-                  <div class="game-controls-meta">
-                    <span>Modos: Infinito y Clásico</span>
-                    <span>PC y Android: Toque rápido</span>
-                  </div>
-                  <div class="game-actions">
-                    <button
-                      id="btn-play-tic-tac-toe"
-                      class="btn btn-primary btn-block"
-                      type="button"
-                      data-game="tic-tac-toe"
-                    >
-                      Jugar Tres en Raya
-                    </button>
-                  </div>
-                </div>
-              </article>
-            </div>
+            <button id="btn-open-invite" class="btn btn-subtle btn-compact" type="button">Código / QR</button>
+            <button id="btn-leave-room" class="btn btn-danger-ghost btn-compact" type="button">Salir</button>
           </div>
         </section>
 
-        <!-- VIEW 2: ACTIVE GAME STAGE -->
+        <!-- Scrollable Section Workspace (Fullscreen & Mobile Safe) -->
+        <main id="workspace-scroller" class="workspace-scroller">
+          <div id="view-container" class="view-container"></div>
+        </main>
+
+        <!-- Active Game Stage (Non-scrolling lock so boards never move accidentally) -->
         <section id="view-game" class="view-game hidden" aria-label="Área de juego activa">
           <div class="game-stage-bar">
             <button id="btn-back-hub" class="btn btn-subtle btn-compact" type="button">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true">
-                <path d="m15 18-6-6 6-6" stroke-linecap="round" stroke-linejoin="round"/>
-              </svg>
+              <span>←</span>
               <span>Salir</span>
             </button>
 
@@ -348,18 +185,16 @@
               <span id="stage-mode-badge" class="stage-badge">Online</span>
             </div>
 
-            <div class="stage-controls" id="stage-extra-controls">
+            <div class="stage-controls">
               <div class="stage-mini-reactions hidden" id="stage-mini-reactions">
-                <button type="button" class="reaction-btn" data-react="🔥" aria-label="Enviar fuego">🔥</button>
-                <button type="button" class="reaction-btn" data-react="👏" aria-label="Enviar aplauso">👏</button>
+                <button type="button" class="reaction-btn" data-react="🔥" aria-label="Fuego">🔥</button>
+                <button type="button" class="reaction-btn" data-react="👏" aria-label="Aplauso">👏</button>
               </div>
-              <button
-                id="btn-stage-fullscreen"
-                class="btn btn-subtle btn-compact"
-                type="button"
-                title="Pantalla completa"
-                aria-label="Pantalla completa"
-              >
+              <button id="btn-stage-chat" class="btn btn-subtle btn-compact hidden" type="button" title="Chat de partida">
+                <span>💬</span>
+                <span id="stage-chat-badge" class="pill accent hidden">0</span>
+              </button>
+              <button id="btn-stage-fullscreen" class="btn btn-subtle btn-compact" type="button" title="Pantalla completa">
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true">
                   <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3" stroke-linecap="round" stroke-linejoin="round"/>
                 </svg>
@@ -371,125 +206,191 @@
             </div>
           </div>
 
-          <!-- Dynamic Game Mount Container -->
-          <div id="game-mount" class="game-mount"></div>
+          <div id="stage-voice-slot"></div>
+
+          <div class="game-stage-body">
+            <div id="game-mount" class="game-mount"></div>
+
+            <!-- In-Match Chat Drawer (PC side panel / Android bottom sheet) -->
+            <aside id="match-chat-drawer" class="match-chat-drawer hidden" aria-label="Chat de partida">
+              <div class="chat-thread-head" style="padding:9px 12px;">
+                <strong style="font-size:0.86rem;">Chat de Sala</strong>
+                <button id="btn-close-match-chat" type="button" class="icon-btn" style="width:30px;height:30px;" aria-label="Ocultar chat">✕</button>
+              </div>
+              <div id="match-chat-messages" class="chat-messages-scroll" style="padding:10px;"></div>
+              <form id="form-match-chat" class="chat-composer" style="padding:8px;" autocomplete="off">
+                <input id="input-match-chat" class="text-input" style="height:38px;font-size:0.86rem;" maxlength="260" placeholder="Mensaje rápido…" aria-label="Mensaje en partida" />
+                <button type="submit" class="btn btn-primary btn-compact">Enviar</button>
+              </form>
+            </aside>
+
+            <button id="btn-match-chat-fab" type="button" class="match-chat-fab hidden" aria-label="Abrir chat de partida">
+              <span>💬</span>
+              <span id="match-chat-fab-badge" class="pill accent hidden">0</span>
+            </button>
+          </div>
         </section>
-      </main>
-
-      <!-- Floating Reaction / Toast Notification -->
-      <div id="toast-stack" class="toast-stack" aria-live="polite"></div>
-
-      <!-- MODAL 1: Mode Picker (when clicking a game while not yet in a P2P room) -->
-      <div id="modal-mode-picker" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="modal-mode-title">
-        <div class="modal-sheet">
-          <div class="modal-header">
-            <div>
-              <h2 id="modal-mode-title" class="modal-title">¿Cómo quieres jugar?</h2>
-              <p id="modal-mode-subtitle" class="modal-subtitle">Elige el modo de partida</p>
-            </div>
-            <button id="btn-close-mode-modal" class="icon-btn" type="button" aria-label="Cerrar">
-              ✕
-            </button>
-          </div>
-
-          <div class="mode-options">
-            <button id="btn-mode-online" class="mode-option-btn primary" type="button">
-              <div class="mode-option-head">
-                <span class="mode-option-title">Online Crossplay (PC ↔ Android)</span>
-                <span class="mode-pill">P2P</span>
-              </div>
-              <span class="mode-option-desc">Crea una sala con código y QR para que otro dispositivo entre al instante.</span>
-            </button>
-
-            <button id="btn-mode-ai" class="mode-option-btn" type="button">
-              <div class="mode-option-head">
-                <span class="mode-option-title">1 Jugador vs IA</span>
-                <span class="mode-pill">Solo</span>
-              </div>
-              <span class="mode-option-desc">Partida inmediata contra la máquina en este dispositivo.</span>
-            </button>
-
-            <button id="btn-mode-local" class="mode-option-btn" type="button">
-              <div class="mode-option-head">
-                <span class="mode-option-title">2 Jugadores en este dispositivo</span>
-                <span class="mode-pill">Local</span>
-              </div>
-              <span class="mode-option-desc">Pantalla compartida (multitáctil en Android/tablet o teclado/turnos en PC).</span>
-            </button>
-          </div>
-        </div>
       </div>
 
-      <!-- MODAL 2: Invite / QR Lobby Modal -->
-      <div id="modal-invite" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="modal-invite-title">
-        <div class="modal-sheet invite-sheet">
-          <div class="modal-header">
-            <div>
-              <h2 id="modal-invite-title" class="modal-title">Sala Crossplay P2P</h2>
-              <p id="modal-invite-status" class="modal-subtitle">Escanea el QR con Android o introduce el código</p>
-            </div>
-            <button id="btn-close-invite-modal" class="icon-btn" type="button" aria-label="Cerrar">
-              ✕
-            </button>
+      <!-- Android Bottom Navigation (switches to left vertical rail in landscape) -->
+      <nav id="mobile-bottom-nav" class="mobile-bottom-nav" aria-label="Navegación móvil">
+        <button type="button" class="mobile-nav-btn active" data-nav="inicio"><span>🏠</span><span>Inicio</span></button>
+        <button type="button" class="mobile-nav-btn" data-nav="juegos"><span>🎮</span><span>Juegos</span></button>
+        <button type="button" class="mobile-nav-btn" data-nav="salas"><span>🛰️</span><span>Salas</span></button>
+        <button type="button" class="mobile-nav-btn" data-nav="mensajes">
+          <span>💬</span><span>Chat</span>
+          <span id="badge-mob-messages" class="mobile-nav-badge hidden">0</span>
+        </button>
+        <button type="button" class="mobile-nav-btn" id="btn-mobile-more">
+          <span>☰</span><span>Más</span>
+          <span id="badge-mob-more" class="mobile-nav-badge hidden">0</span>
+        </button>
+      </nav>
+
+      <!-- PC Right Social & Active Room Rail -->
+      <aside id="pc-social-rail" class="pc-social-rail" aria-label="Panel social y sala"></aside>
+    </div>
+
+    <!-- Toast Stack -->
+    <div id="toast-stack" class="toast-stack" aria-live="polite"></div>
+
+    <!-- MODAL: Mode Picker -->
+    <div id="modal-mode-picker" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="modal-mode-title">
+      <div class="modal-sheet">
+        <div class="modal-header">
+          <div>
+            <h2 id="modal-mode-title" class="modal-title">¿Cómo quieres jugar?</h2>
+            <p id="modal-mode-subtitle" class="modal-subtitle">Elige el modo de partida</p>
           </div>
-
-          <div class="invite-body">
-            <div class="qr-well">
-              <canvas id="qr-canvas" width="200" height="200" aria-label="Código QR de invitación a la sala"></canvas>
+          <button id="btn-close-mode-modal" class="icon-btn" type="button" aria-label="Cerrar">✕</button>
+        </div>
+        <div class="mode-options">
+          <button id="btn-mode-online" class="mode-option-btn primary" type="button">
+            <div class="mode-option-head">
+              <span class="mode-option-title">Online Crossplay (PC ↔ Android)</span>
+              <span class="pill accent">P2P</span>
             </div>
-
-            <div class="invite-code-box">
-              <span class="invite-code-label">CÓDIGO DE SALA</span>
-              <div class="invite-code-row">
-                <strong id="invite-room-code" class="invite-code-value">-----</strong>
-                <button id="btn-copy-code" class="btn btn-subtle btn-compact" type="button">
-                  Copiar código
-                </button>
-              </div>
+            <span class="mode-option-desc">Crea una sala con código y QR para que otro dispositivo entre al instante.</span>
+          </button>
+          <button id="btn-mode-ai" class="mode-option-btn" type="button">
+            <div class="mode-option-head">
+              <span class="mode-option-title">1 Jugador vs IA</span>
+              <span class="pill">Solo</span>
             </div>
-
-            <div class="invite-actions">
-              <button id="btn-copy-link" class="btn btn-primary" type="button">
-                Copiar enlace directo
-              </button>
-              <button id="btn-native-share" class="btn btn-secondary hidden" type="button">
-                Compartir…
-              </button>
+            <span class="mode-option-desc">Partida inmediata contra la máquina en este dispositivo.</span>
+          </button>
+          <button id="btn-mode-local" class="mode-option-btn" type="button">
+            <div class="mode-option-head">
+              <span class="mode-option-title">2 Jugadores en este dispositivo</span>
+              <span class="pill">Local</span>
             </div>
-          </div>
+            <span class="mode-option-desc">Pantalla compartida (multitáctil en Android/tablet o teclado/turnos en PC).</span>
+          </button>
         </div>
       </div>
+    </div>
 
-      <!-- MODAL 3: Edit Nickname / Install Help -->
-      <div id="modal-profile" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="modal-profile-title">
-        <div class="modal-sheet">
-          <div class="modal-header">
-            <div>
-              <h2 id="modal-profile-title" class="modal-title">Tu perfil de jugador</h2>
-              <p class="modal-subtitle">Se mostrará a tu rival al conectar entre PC y Android</p>
-            </div>
-            <button id="btn-close-profile-modal" class="icon-btn" type="button" aria-label="Cerrar">
-              ✕
-            </button>
+    <!-- MODAL: Invite QR -->
+    <div id="modal-invite" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="modal-invite-title">
+      <div class="modal-sheet">
+        <div class="modal-header">
+          <div>
+            <h2 id="modal-invite-title" class="modal-title">Sala Crossplay P2P</h2>
+            <p id="modal-invite-status" class="modal-subtitle">Escanea el QR con Android o introduce el código</p>
           </div>
-
-          <form id="form-profile" class="profile-form">
-            <label for="input-player-name" class="field-label">Apodo</label>
-            <input
-              id="input-player-name"
-              class="text-input"
-              type="text"
-              maxlength="16"
-              required
-              placeholder="Tu nombre"
-            />
-            <div class="modal-footer-actions">
-              <button id="btn-save-profile" class="btn btn-primary btn-block" type="submit">
-                Guardar apodo
-              </button>
-            </div>
-          </form>
+          <button id="btn-close-invite-modal" class="icon-btn" type="button" aria-label="Cerrar">✕</button>
         </div>
+        <div class="qr-well">
+          <canvas id="qr-canvas" width="200" height="200" aria-label="Código QR de invitación"></canvas>
+        </div>
+        <div class="invite-code-box">
+          <span class="invite-code-label">CÓDIGO DE SALA</span>
+          <div class="invite-code-row">
+            <strong id="invite-room-code" class="invite-code-value">-----</strong>
+            <button id="btn-copy-code" class="btn btn-subtle btn-compact" type="button">Copiar código</button>
+          </div>
+        </div>
+        <div class="invite-actions">
+          <button id="btn-copy-link" class="btn btn-primary" type="button">Copiar enlace</button>
+          <button id="btn-native-share" class="btn btn-secondary hidden" type="button">Compartir…</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- MODAL: Auth & OTP -->
+    <div id="modal-auth" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="modal-auth-title">
+      <div class="modal-sheet">
+        <div class="modal-header">
+          <div>
+            <h2 id="modal-auth-title" class="modal-title">Cuenta Mini-Games</h2>
+            <p id="modal-auth-subtitle" class="modal-subtitle">Autenticación segura</p>
+          </div>
+          <button id="btn-close-auth-modal" class="icon-btn" type="button" aria-label="Cerrar">✕</button>
+        </div>
+        <div id="modal-auth-body" class="form-stack"></div>
+      </div>
+    </div>
+
+    <!-- MODAL: Android More Sections Sheet -->
+    <div id="modal-mobile-more" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-label="Más secciones">
+      <div class="modal-sheet">
+        <div class="modal-header">
+          <div>
+            <h2 class="modal-title">Navegación Completa</h2>
+            <p class="modal-subtitle">Todas las secciones de Mini-Games</p>
+          </div>
+          <button id="btn-close-mobile-more" class="icon-btn" type="button" aria-label="Cerrar">✕</button>
+        </div>
+        <div class="mobile-more-grid">
+          <button type="button" class="btn btn-secondary" data-nav="jugar">⚡ Jugar</button>
+          <button type="button" class="btn btn-secondary" data-nav="amigos">👥 Amigos</button>
+          <button type="button" class="btn btn-secondary" data-nav="ranking">🏆 Ranking</button>
+          <button type="button" class="btn btn-secondary" data-nav="perfil">🪪 Perfil</button>
+          <button type="button" class="btn btn-secondary" data-nav="ajustes">⚙️ Ajustes</button>
+          <button type="button" class="btn btn-primary" id="btn-more-create-room">+ Crear Sala</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- MODAL: Group Chat Create / Manage -->
+    <div id="modal-group" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="modal-group-title">
+      <div class="modal-sheet">
+        <div class="modal-header">
+          <div>
+            <h2 id="modal-group-title" class="modal-title">Chat Grupal</h2>
+            <p class="modal-subtitle">Crea o administra participantes del grupo</p>
+          </div>
+          <button id="btn-close-group-modal" class="icon-btn" type="button" aria-label="Cerrar">✕</button>
+        </div>
+        <div id="modal-group-body" class="form-stack"></div>
+      </div>
+    </div>
+
+    <!-- MODAL: Voice Audio Devices -->
+    <div id="modal-voice-devices" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="modal-voice-dev-title">
+      <div class="modal-sheet">
+        <div class="modal-header">
+          <div>
+            <h2 id="modal-voice-dev-title" class="modal-title">Dispositivos de Voz</h2>
+            <p class="modal-subtitle">Selecciona micrófono y salida de audio (PC)</p>
+          </div>
+          <button id="btn-close-voice-dev" class="icon-btn" type="button" aria-label="Cerrar">✕</button>
+        </div>
+        <div id="modal-voice-dev-body" class="form-stack"></div>
+      </div>
+    </div>
+
+    <!-- DRAWER: Notifications Center -->
+    <div id="drawer-notifications" class="drawer-backdrop hidden" role="dialog" aria-modal="true" aria-label="Centro de notificaciones">
+      <div class="drawer-panel">
+        <div class="chat-thread-head">
+          <strong>Notificaciones</strong>
+          <div style="display:flex;gap:6px;">
+            <button id="btn-read-all-notifs" type="button" class="btn btn-subtle btn-compact">Marcar leídas</button>
+            <button id="btn-close-notif-drawer" type="button" class="icon-btn" style="width:32px;height:32px;" aria-label="Cerrar">✕</button>
+          </div>
+        </div>
+        <div id="notif-list-body" class="drawer-body"></div>
       </div>
     </div>
 

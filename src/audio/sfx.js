@@ -1,4 +1,4 @@
-// Synthesized tactile sound effects (Web Audio API) + Android haptics
+// Synthesized tactile sound effects & optional ambient loop (Web Audio API) + Android haptics
 
 const STORAGE_KEY = 'mg_sound_muted_v1';
 
@@ -6,6 +6,11 @@ class SoundEngine {
   constructor() {
     this.ctx = null;
     this.muted = localStorage.getItem(STORAGE_KEY) === '1';
+    this.masterVolume = 0.85;
+    this.sfxVolume = 0.9;
+    this.musicVolume = 0;
+    this.musicTimer = null;
+    this.musicStep = 0;
   }
 
   ensureContext() {
@@ -21,9 +26,26 @@ class SoundEngine {
     return this.ctx;
   }
 
+  applySettings({ masterVolume, sfxVolume, musicVolume }) {
+    if (typeof masterVolume === 'number') this.masterVolume = Math.max(0, Math.min(1, masterVolume));
+    if (typeof sfxVolume === 'number') this.sfxVolume = Math.max(0, Math.min(1, sfxVolume));
+    if (typeof musicVolume === 'number') this.musicVolume = Math.max(0, Math.min(1, musicVolume));
+
+    if (!this.muted && this.musicVolume > 0.02) {
+      this.startAmbientLoop();
+    } else {
+      this.stopAmbientLoop();
+    }
+  }
+
   setMuted(muted) {
     this.muted = Boolean(muted);
     localStorage.setItem(STORAGE_KEY, this.muted ? '1' : '0');
+    if (this.muted) {
+      this.stopAmbientLoop();
+    } else if (this.musicVolume > 0.02) {
+      this.startAmbientLoop();
+    }
     return this.muted;
   }
 
@@ -36,14 +58,21 @@ class SoundEngine {
       if (typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function') {
         navigator.vibrate(pattern);
       }
-    } catch {
-      // Ignore on unsupported devices
-    }
+    } catch {}
   }
 
-  tone({ freq = 440, endFreq = null, duration = 0.08, type = 'triangle', gain = 0.14, delay = 0 }) {
+  effectiveSfxGain(baseGain) {
+    return Math.max(0.0001, baseGain * this.masterVolume * this.sfxVolume);
+  }
+
+  tone({ freq = 440, endFreq = null, duration = 0.08, type = 'triangle', gain = 0.14, delay = 0, isMusic = false }) {
     const ctx = this.ensureContext();
     if (!ctx) return;
+
+    const scaledGain = isMusic
+      ? Math.max(0.0001, gain * this.masterVolume * this.musicVolume)
+      : this.effectiveSfxGain(gain);
+    if (scaledGain <= 0.001) return;
 
     const now = ctx.currentTime + delay;
     const osc = ctx.createOscillator();
@@ -56,14 +85,40 @@ class SoundEngine {
     }
 
     amp.gain.setValueAtTime(0.0001, now);
-    amp.gain.linearRampToValueAtTime(gain, now + 0.006);
+    amp.gain.linearRampToValueAtTime(scaledGain, now + 0.008);
     amp.gain.exponentialRampToValueAtTime(0.0001, now + duration);
 
     osc.connect(amp);
     amp.connect(ctx.destination);
 
     osc.start(now);
-    osc.stop(now + duration + 0.01);
+    osc.stop(now + duration + 0.02);
+  }
+
+  startAmbientLoop() {
+    if (this.musicTimer || this.muted || this.musicVolume <= 0.02) return;
+    const progression = [220, 261.63, 329.63, 392.0, 293.66, 349.23, 440.0, 329.63];
+    this.musicTimer = setInterval(() => {
+      if (this.muted || this.musicVolume <= 0.02 || !this.ctx || this.ctx.state !== 'running') return;
+      const root = progression[this.musicStep % progression.length];
+      this.musicStep += 1;
+      this.tone({ freq: root, duration: 1.4, type: 'sine', gain: 0.045, isMusic: true });
+      this.tone({ freq: root * 1.5, duration: 1.1, type: 'sine', gain: 0.025, delay: 0.12, isMusic: true });
+    }, 1500);
+  }
+
+  stopAmbientLoop() {
+    if (this.musicTimer) {
+      clearInterval(this.musicTimer);
+      this.musicTimer = null;
+    }
+  }
+
+  testAudio() {
+    this.ensureContext();
+    this.tone({ freq: 440, duration: 0.1, type: 'triangle', gain: 0.14 });
+    this.tone({ freq: 587.33, duration: 0.12, type: 'triangle', gain: 0.14, delay: 0.11 });
+    this.tone({ freq: 783.99, duration: 0.18, type: 'sine', gain: 0.15, delay: 0.22 });
   }
 
   click() {
@@ -142,6 +197,10 @@ class SoundEngine {
 
   reaction() {
     this.tone({ freq: 660, endFreq: 880, duration: 0.09, type: 'sine', gain: 0.09 });
+  }
+
+  notification() {
+    this.tone({ freq: 587.33, endFreq: 880, duration: 0.11, type: 'sine', gain: 0.08 });
   }
 }
 

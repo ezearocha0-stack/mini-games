@@ -109,7 +109,16 @@ function chooseSmartMove(board, queues, variant, aiPlayer) {
 }
 
 export function createTicTacToeGame(ctx) {
-  const { mountEl, mode, isHost, localPlayerIndex, sendNet, onMatchWin, onRequestHub } = ctx;
+  const {
+    mountEl,
+    mode,
+    isHost,
+    isSpectator = false,
+    localPlayerIndex,
+    sendNet,
+    onMatchWin,
+    onRequestHub
+  } = ctx;
   let players = { ...ctx.players };
 
   let variant = 'infinite';
@@ -220,7 +229,7 @@ export function createTicTacToeGame(ctx) {
   }
 
   function canLocalActNow() {
-    if (finished) return false;
+    if (finished || isSpectator) return false;
     if (mode === 'local') return true;
     if (mode === 'ai') return turn === 1;
     return turn === localPlayerIndex;
@@ -230,7 +239,7 @@ export function createTicTacToeGame(ctx) {
     tabInfinite.classList.toggle('active', variant === 'infinite');
     tabClassic.classList.toggle('active', variant === 'classic');
 
-    const canSwitchVariant = mode !== 'online' || isHost;
+    const canSwitchVariant = !isSpectator && (mode !== 'online' || isHost);
     tabInfinite.disabled = !canSwitchVariant;
     tabClassic.disabled = !canSwitchVariant;
 
@@ -248,8 +257,13 @@ export function createTicTacToeGame(ctx) {
     side2El.classList.toggle('active-turn', !finished && turn === 2);
 
     if (mode === 'online') {
-      role1El.textContent = localPlayerIndex === 1 ? 'Tú · X' : 'Rival · X';
-      role2El.textContent = localPlayerIndex === 2 ? 'Tú · O' : 'Rival · O';
+      if (isSpectator) {
+        role1El.textContent = 'Jugador 1 · X';
+        role2El.textContent = 'Jugador 2 · O';
+      } else {
+        role1El.textContent = localPlayerIndex === 1 ? 'Tú · X' : 'Rival · X';
+        role2El.textContent = localPlayerIndex === 2 ? 'Tú · O' : 'Rival · O';
+      }
     } else if (mode === 'ai') {
       role1El.textContent = 'Tú · X';
       role2El.textContent = 'IA · O';
@@ -285,12 +299,15 @@ export function createTicTacToeGame(ctx) {
       const val = board[i];
       btn.className = 'ttt-cell';
 
-      if (val === 1) {
-        btn.innerHTML = SVG_X;
-      } else if (val === 2) {
-        btn.innerHTML = SVG_O;
-      } else {
-        btn.innerHTML = '';
+      if (btn.dataset.val !== String(val)) {
+        btn.dataset.val = String(val);
+        if (val === 1) {
+          btn.innerHTML = SVG_X;
+        } else if (val === 2) {
+          btn.innerHTML = SVG_O;
+        } else {
+          btn.innerHTML = '';
+        }
       }
 
       if (i === vanishingCell) {
@@ -436,7 +453,10 @@ export function createTicTacToeGame(ctx) {
     setVariant('classic', false);
   });
 
-  mountEl.querySelector('#ttt-btn-rematch').addEventListener('click', () => {
+  const btnRematch = mountEl.querySelector('#ttt-btn-rematch');
+  if (isSpectator) btnRematch.classList.add('hidden');
+  btnRematch.addEventListener('click', () => {
+    if (isSpectator) return;
     sfx.click();
     restart(false);
   });
@@ -448,6 +468,7 @@ export function createTicTacToeGame(ctx) {
 
   function onKeyDown(e) {
     if (!canLocalActNow()) return;
+    if (e.target?.closest?.('input, textarea, select, [contenteditable="true"]')) return;
     if (e.key >= '1' && e.key <= '9') {
       e.preventDefault();
       attemptHumanMove(Number(e.key) - 1);
@@ -465,6 +486,8 @@ export function createTicTacToeGame(ctx) {
     onNetMessage(msg) {
       if (!msg) return;
       if (msg.kind === 'MOVE') {
+        const expectedSender = isHost ? 2 : 1;
+        if (!isSpectator && mode === 'online' && Number(msg.player) !== expectedSender) return;
         applyMove(Number(msg.cell), Number(msg.player));
       } else if (msg.kind === 'SET_VARIANT') {
         setVariant(msg.variant, true);
@@ -476,6 +499,42 @@ export function createTicTacToeGame(ctx) {
     updatePlayers(nextPlayers) {
       players = { ...nextPlayers };
       updateHud();
+    },
+
+    getSnapshot() {
+      return {
+        gameId: 'tic-tac-toe',
+        variant,
+        board: [...board],
+        queues: { 1: [...queues[1]], 2: [...queues[2]] },
+        turn,
+        nextStarter,
+        finished,
+        winLine: [...winLine]
+      };
+    },
+
+    applySnapshot(snap) {
+      if (!snap || snap.gameId !== 'tic-tac-toe' || !Array.isArray(snap.board)) return;
+      variant = snap.variant === 'classic' ? 'classic' : 'infinite';
+      board = [...snap.board];
+      queues = {
+        1: Array.isArray(snap.queues?.[1]) ? [...snap.queues[1]] : [],
+        2: Array.isArray(snap.queues?.[2]) ? [...snap.queues[2]] : []
+      };
+      turn = Number(snap.turn) || 1;
+      nextStarter = Number(snap.nextStarter) || 1;
+      finished = Boolean(snap.finished);
+      winLine = Array.isArray(snap.winLine) ? [...snap.winLine] : [];
+      updateVariantUi();
+      renderBoard();
+      updateHud();
+      if (finished) {
+        const w = checkWinner(board);
+        showResult(w ? { winner: w.winner, draw: false } : { winner: 0, draw: true });
+      } else {
+        resultBox.classList.add('hidden');
+      }
     },
 
     restart: () => restart(false),

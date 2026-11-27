@@ -3,6 +3,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { attachRoomWebSocketServer } from './server/wsRooms.js';
+import { handleApiRequest } from './server/api.js';
+import { applySecurityHeaders } from './server/security.js';
+import { getDb } from './server/db.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DIST_DIR = path.join(__dirname, 'dist');
@@ -57,7 +60,8 @@ function sendFile(res, filePath, customHeaders = {}) {
   });
 }
 
-const server = http.createServer((req, res) => {
+const server = http.createServer(async (req, res) => {
+  applySecurityHeaders(res);
   const reqUrl = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
   const pathname = decodeURIComponent(reqUrl.pathname);
 
@@ -65,6 +69,12 @@ const server = http.createServer((req, res) => {
   if (pathname === '/healthz') {
     res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
     res.end(JSON.stringify({ ok: true, service: 'mini-games-crossplay' }));
+    return;
+  }
+
+  // REST Platform API routes
+  if (pathname.startsWith('/api/')) {
+    await handleApiRequest(req, res);
     return;
   }
 
@@ -93,6 +103,7 @@ const server = http.createServer((req, res) => {
   });
 });
 
+getDb();
 attachRoomWebSocketServer(server);
 
 server.listen(PORT, HOST, () => {

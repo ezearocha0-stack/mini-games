@@ -166,7 +166,16 @@ function chooseAiColumn(board, aiPlayer) {
 }
 
 export function createConnectFourGame(ctx) {
-  const { mountEl, mode, isHost, localPlayerIndex, sendNet, onMatchWin, onRequestHub } = ctx;
+  const {
+    mountEl,
+    mode,
+    isHost,
+    isSpectator = false,
+    localPlayerIndex,
+    sendNet,
+    onMatchWin,
+    onRequestHub
+  } = ctx;
   let players = { ...ctx.players };
 
   let board = createEmptyBoard();
@@ -298,7 +307,7 @@ export function createConnectFourGame(ctx) {
   }
 
   function canLocalActNow() {
-    if (finished) return false;
+    if (finished || isSpectator) return false;
     if (mode === 'local') return true;
     if (mode === 'ai') return turn === 1;
     return turn === localPlayerIndex;
@@ -322,8 +331,13 @@ export function createConnectFourGame(ctx) {
     side2El.classList.toggle('active-turn', !finished && turn === 2);
 
     if (mode === 'online') {
-      role1El.textContent = localPlayerIndex === 1 ? 'Tú · Naranja' : 'Rival · Naranja';
-      role2El.textContent = localPlayerIndex === 2 ? 'Tú · Turquesa' : 'Rival · Turquesa';
+      if (isSpectator) {
+        role1El.textContent = 'Jugador 1 · Naranja';
+        role2El.textContent = 'Jugador 2 · Turquesa';
+      } else {
+        role1El.textContent = localPlayerIndex === 1 ? 'Tú · Naranja' : 'Rival · Naranja';
+        role2El.textContent = localPlayerIndex === 2 ? 'Tú · Turquesa' : 'Rival · Turquesa';
+      }
     } else if (mode === 'ai') {
       role1El.textContent = 'Tú · Naranja';
       role2El.textContent = 'IA · Turquesa';
@@ -483,6 +497,7 @@ export function createConnectFourGame(ctx) {
 
   function onKeyDown(e) {
     if (!canLocalActNow()) return;
+    if (e.target?.closest?.('input, textarea, select, [contenteditable="true"]')) return;
     if (e.key >= '1' && e.key <= '7') {
       e.preventDefault();
       attemptHumanMove(Number(e.key) - 1);
@@ -502,7 +517,10 @@ export function createConnectFourGame(ctx) {
     }
   }
 
-  mountEl.querySelector('#c4-btn-rematch').addEventListener('click', () => {
+  const btnRematch = mountEl.querySelector('#c4-btn-rematch');
+  if (isSpectator) btnRematch.classList.add('hidden');
+  btnRematch.addEventListener('click', () => {
+    if (isSpectator) return;
     sfx.click();
     restart(false);
   });
@@ -523,6 +541,8 @@ export function createConnectFourGame(ctx) {
     onNetMessage(msg) {
       if (!msg) return;
       if (msg.kind === 'MOVE') {
+        const expectedSender = isHost ? 2 : 1;
+        if (!isSpectator && mode === 'online' && Number(msg.player) !== expectedSender) return;
         applyMove(Number(msg.col), Number(msg.player));
       } else if (msg.kind === 'RESTART') {
         restart(true, msg.starter);
@@ -532,6 +552,36 @@ export function createConnectFourGame(ctx) {
     updatePlayers(nextPlayers) {
       players = { ...nextPlayers };
       updateHud();
+    },
+
+    getSnapshot() {
+      return {
+        gameId: 'connect-four',
+        board: board.map((r) => [...r]),
+        turn,
+        nextStarter,
+        finished,
+        winningCells,
+        lastPlaced
+      };
+    },
+
+    applySnapshot(snap) {
+      if (!snap || snap.gameId !== 'connect-four' || !Array.isArray(snap.board)) return;
+      board = snap.board.map((r) => [...r]);
+      turn = Number(snap.turn) || 1;
+      nextStarter = Number(snap.nextStarter) || 1;
+      finished = Boolean(snap.finished);
+      winningCells = Array.isArray(snap.winningCells) ? snap.winningCells : [];
+      lastPlaced = snap.lastPlaced || null;
+      renderBoard();
+      updateHud();
+      if (finished) {
+        const outcome = checkWin(board);
+        if (outcome) presentResult(outcome);
+      } else {
+        resultBox.classList.add('hidden');
+      }
     },
 
     restart: () => restart(false),

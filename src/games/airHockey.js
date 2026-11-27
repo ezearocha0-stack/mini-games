@@ -18,6 +18,8 @@ export function createAirHockeyGame(ctx) {
     mountEl,
     mode,
     isHost,
+    isSpectator = false,
+    controlSensitivity = 1,
     localPlayerIndex,
     sendNet,
     sendFastNet,
@@ -26,9 +28,10 @@ export function createAirHockeyGame(ctx) {
   } = ctx;
   const fastSend = sendFastNet || sendNet;
   let players = { ...ctx.players };
+  const sensitivity = clamp(Number(controlSensitivity) || 1, 0.65, 1.45);
 
-  // Guest in online mode sees table rotated 180deg so own goal is always at bottom
-  const flipView = mode === 'online' && !isHost;
+  // Guest in online mode sees table rotated 180deg so own goal is always at bottom (spectator watches standard view)
+  const flipView = mode === 'online' && !isHost && !isSpectator;
 
   mountEl.innerHTML = `
     <div class="hockey-wrap">
@@ -130,6 +133,8 @@ export function createAirHockeyGame(ctx) {
   const netTarget = {
     p1x: 0.5,
     p1y: H - 0.22,
+    p2x: 0.5,
+    p2y: 0.22,
     px: 0.5,
     py: H / 2,
     pvx: 0,
@@ -153,8 +158,13 @@ export function createAirHockeyGame(ctx) {
     nameTopEl.textContent = players[topIdx]?.name || `Jugador ${topIdx}`;
 
     if (mode === 'online') {
-      roleBottomEl.textContent = `Tú · ${players[bottomIdx]?.device || ''}`;
-      roleTopEl.textContent = `Rival · ${players[topIdx]?.device || ''}`;
+      if (isSpectator) {
+        roleBottomEl.textContent = `Jugador 1 · ${players[bottomIdx]?.device || ''}`;
+        roleTopEl.textContent = `Jugador 2 · ${players[topIdx]?.device || ''}`;
+      } else {
+        roleBottomEl.textContent = `Tú · ${players[bottomIdx]?.device || ''}`;
+        roleTopEl.textContent = `Rival · ${players[topIdx]?.device || ''}`;
+      }
     } else if (mode === 'ai') {
       roleBottomEl.textContent = 'Tú';
       roleTopEl.textContent = 'CPU Táctica';
@@ -286,6 +296,7 @@ export function createAirHockeyGame(ctx) {
   }
 
   function handlePointerInput(e, isDown = false) {
+    if (isSpectator) return;
     const isTouch = e.pointerType === 'touch';
     if (!isTouch && e.type === 'pointermove' && mode === 'local' && e.buttons === 0) {
       const pt = screenToTableCoords(e.clientX, e.clientY, false);
@@ -340,6 +351,8 @@ export function createAirHockeyGame(ctx) {
   }
 
   function onKeyDown(e) {
+    if (isSpectator) return;
+    if (e.target?.closest?.('input, textarea, select, [contenteditable="true"]')) return;
     const code = e.code;
     if (
       ['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(
@@ -356,8 +369,8 @@ export function createAirHockeyGame(ctx) {
   }
 
   function updateKeyboardTargets(dt) {
-    if (keys.size === 0) return;
-    const kbSpeed = 1.48 * dt;
+    if (isSpectator || keys.size === 0) return;
+    const kbSpeed = 1.48 * sensitivity * dt;
 
     if (mode !== 'local') {
       let dx = 0;
@@ -586,6 +599,8 @@ export function createAirHockeyGame(ctx) {
       seq: ++snapSeq,
       p1x: +state.p1.x.toFixed(4),
       p1y: +state.p1.y.toFixed(4),
+      p2x: +state.p2.x.toFixed(4),
+      p2y: +state.p2.y.toFixed(4),
       px: +state.puck.x.toFixed(4),
       py: +state.puck.y.toFixed(4),
       pvx: +state.puck.vx.toFixed(3),
@@ -698,8 +713,16 @@ export function createAirHockeyGame(ctx) {
 
   // Client-Side Predicted Simulation for Guest (0ms own mallet + 0ms local puck strike!)
   function stepGuestSimulation(dt, now) {
-    // 1. Own mallet moves with 0ms local latency (never rubberbanded by Host!)
-    moveMallet(state.p2, MALLET_R, H / 2 - MALLET_R * 0.95, dt);
+    // 1. Own mallet moves with 0ms local latency (never rubberbanded by Host!) — spectators interpolate P2 instead
+    if (isSpectator) {
+      if (netTarget.hasSnapshot) {
+        const malletBlend = Math.min(1, dt * 24);
+        state.p2.x += (netTarget.p2x - state.p2.x) * malletBlend;
+        state.p2.y += (netTarget.p2y - state.p2.y) * malletBlend;
+      }
+    } else {
+      moveMallet(state.p2, MALLET_R, H / 2 - MALLET_R * 0.95, dt);
+    }
 
     // 2. Smoothly interpolate opponent (Host) mallet
     if (netTarget.hasSnapshot) {
@@ -721,7 +744,9 @@ export function createAirHockeyGame(ctx) {
     const subDt = dt / subSteps;
     for (let s = 0; s < subSteps; s++) {
       stepPuckAndWalls(subDt, false);
-      collideMalletPuck(state.p2, '#1ad1be', true);
+      if (!isSpectator) {
+        collideMalletPuck(state.p2, '#1ad1be', true);
+      }
     }
 
     // 4. Gently reconcile puck with Host snapshots ONLY when not in post-local-strike hold window
@@ -970,7 +995,12 @@ export function createAirHockeyGame(ctx) {
     }
   }
 
+  if (isSpectator) {
+    btnRematch.classList.add('hidden');
+  }
+
   btnRematch.addEventListener('click', () => {
+    if (isSpectator) return;
     sfx.click();
     restart(false);
   });
@@ -1027,6 +1057,8 @@ export function createAirHockeyGame(ctx) {
 
         netTarget.p1x = msg.p1x;
         netTarget.p1y = msg.p1y;
+        if (typeof msg.p2x === 'number') netTarget.p2x = msg.p2x;
+        if (typeof msg.p2y === 'number') netTarget.p2y = msg.p2y;
         netTarget.px = msg.px;
         netTarget.py = msg.py;
         netTarget.pvx = msg.pvx;
@@ -1098,6 +1130,52 @@ export function createAirHockeyGame(ctx) {
     updatePlayers(nextPlayers) {
       players = { ...nextPlayers };
       refreshHudLabels();
+    },
+
+    getSnapshot() {
+      return {
+        gameId: 'air-hockey',
+        score1: state.score1,
+        score2: state.score2,
+        phase: state.phase,
+        countdown: state.countdown,
+        winner: state.winner,
+        serveTo: state.serveTo,
+        p1: { x: state.p1.x, y: state.p1.y },
+        p2: { x: state.p2.x, y: state.p2.y },
+        puck: { ...state.puck }
+      };
+    },
+
+    applySnapshot(snap) {
+      if (!snap || snap.gameId !== 'air-hockey') return;
+      state.score1 = Number(snap.score1) || 0;
+      state.score2 = Number(snap.score2) || 0;
+      state.phase = snap.phase || 'playing';
+      state.countdown = Number(snap.countdown) || 0;
+      state.winner = Number(snap.winner) || 0;
+      state.serveTo = Number(snap.serveTo) || 0;
+      if (snap.p1) {
+        state.p1.x = clamp(Number(snap.p1.x) || 0.5, MALLET_R, 1 - MALLET_R);
+        state.p1.y = clamp(Number(snap.p1.y) || H - 0.22, H / 2 + MALLET_R * 0.95, H - MALLET_R);
+      }
+      if (snap.p2) {
+        state.p2.x = clamp(Number(snap.p2.x) || 0.5, MALLET_R, 1 - MALLET_R);
+        state.p2.y = clamp(Number(snap.p2.y) || 0.22, MALLET_R, H / 2 - MALLET_R * 0.95);
+      }
+      if (snap.puck) {
+        state.puck.x = Number(snap.puck.x) || 0.5;
+        state.puck.y = Number(snap.puck.y) || H / 2;
+        state.puck.vx = Number(snap.puck.vx) || 0;
+        state.puck.vy = Number(snap.puck.vy) || 0;
+      }
+      netTarget.hasSnapshot = false;
+      refreshScoreText();
+      if (state.phase === 'finished') {
+        showResultBanner();
+      } else {
+        resultBox.classList.add('hidden');
+      }
     },
 
     restart,

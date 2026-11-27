@@ -1,0 +1,634 @@
+/* ==========================================================================
+   MINI-GAMES · Active Game Stage & Game Arenas (Preserved Physics/Rules UI)
+   ========================================================================== */
+
+.view-game {
+  flex: 1 1 0%;
+  min-height: 0;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px clamp(10px, 2vw, 22px);
+  overflow: hidden;
+  touch-action: none;
+}
+
+.game-stage-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: nowrap;
+  flex-shrink: 0;
+  min-height: 38px;
+}
+
+.stage-title-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.stage-title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 1.04rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.stage-badge {
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  padding: 3px 8px;
+  border-radius: 6px;
+  background: var(--bg-surface-2);
+  color: var(--text-secondary);
+  border: 1px solid var(--hairline);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.stage-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.stage-mini-reactions {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* Split Stage Body: Game Mount + Optional PC Side Chat Drawer */
+.game-stage-body {
+  flex: 1 1 0%;
+  min-height: 0;
+  display: flex;
+  align-items: stretch;
+  gap: 12px;
+  overflow: hidden;
+  position: relative;
+}
+
+.game-mount {
+  flex: 1 1 0%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  min-height: 0;
+  min-width: 0;
+  width: 100%;
+  overflow: hidden;
+}
+
+/* Shared Game HUD Scoreboard */
+.match-hud {
+  width: 100%;
+  max-width: 540px;
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 12px;
+  margin-bottom: 6px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-surface-1);
+  border: 1px solid var(--hairline);
+  box-shadow: var(--shadow-raised);
+  flex-shrink: 0;
+}
+
+.hud-side {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.hud-side.right {
+  justify-content: flex-end;
+  text-align: right;
+}
+
+.hud-swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.hud-swatch.p1 {
+  background: var(--game-p1);
+}
+
+.hud-swatch.p2 {
+  background: var(--game-p2);
+}
+
+.hud-player-info {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.15;
+}
+
+.hud-player-name {
+  font-size: 0.82rem;
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.hud-player-role {
+  font-family: var(--font-mono);
+  font-size: 0.64rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.hud-side.active-turn .hud-player-name {
+  color: var(--text-primary);
+}
+
+.hud-side.active-turn .hud-player-role {
+  color: var(--game-p1);
+}
+
+.hud-side.right.active-turn .hud-player-role {
+  color: var(--game-p2);
+}
+
+.hud-center {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 2px 10px;
+  border-radius: var(--radius-xs);
+  background: var(--bg-well);
+  box-shadow: var(--shadow-well);
+}
+
+.hud-score-big {
+  font-family: var(--font-mono);
+  font-size: 1.05rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  line-height: 1.2;
+}
+
+.hud-substatus {
+  font-size: 0.64rem;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+/* Flexible Stage Wrappers (measured dynamically via ResizeObserver) */
+.hockey-wrap,
+.c4-wrap,
+.ttt-wrap {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  position: relative;
+}
+
+.hockey-stage-box,
+.board-stage-box {
+  flex: 1;
+  width: 100%;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+/* ==========================================================================
+   GAME 1: Neo Air Hockey Stage
+   ========================================================================== */
+.hockey-arena-frame {
+  position: relative;
+  padding: 8px;
+  border-radius: 22px;
+  background: var(--bg-surface-2);
+  border: 1px solid var(--hairline-strong);
+  box-shadow: var(--shadow-raised);
+  touch-action: none;
+  user-select: none;
+}
+
+.hockey-canvas {
+  display: block;
+  border-radius: 14px;
+  background: #0d1116;
+  touch-action: none;
+  cursor: none;
+}
+
+.hockey-help-caption {
+  margin-top: 6px;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  text-align: center;
+  flex-shrink: 0;
+}
+
+/* ==========================================================================
+   GAME 2: Connect 4 Rack
+   ========================================================================== */
+.c4-board-shell {
+  width: 100%;
+  max-width: 500px;
+  padding: clamp(8px, 2vw, 14px);
+  border-radius: var(--radius-md);
+  background: var(--bg-surface-2);
+  border: 1px solid var(--hairline-strong);
+  box-shadow: var(--shadow-raised);
+  user-select: none;
+  touch-action: manipulation;
+}
+
+.c4-preview-row {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: clamp(4px, 1.2vw, 8px);
+  margin-bottom: 6px;
+  height: 20px;
+  align-items: center;
+}
+
+.c4-preview-slot {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+}
+
+.c4-preview-disc {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  opacity: 0;
+  transform: translateY(-4px) scale(0.85);
+  transition: opacity 0.12s ease, transform 0.12s ease;
+}
+
+.c4-preview-slot.show-p1 .c4-preview-disc {
+  background: var(--game-p1);
+  opacity: 0.85;
+  transform: translateY(0) scale(1);
+}
+
+.c4-preview-slot.show-p2 .c4-preview-disc {
+  background: var(--game-p2);
+  opacity: 0.85;
+  transform: translateY(0) scale(1);
+}
+
+.c4-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: clamp(4px, 1.2vw, 8px);
+  background: var(--bg-well);
+  padding: clamp(6px, 1.6vw, 11px);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-well);
+}
+
+.c4-col-btn {
+  display: flex;
+  flex-direction: column;
+  gap: clamp(4px, 1.2vw, 8px);
+  background: transparent;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  border-radius: 999px;
+  transition: background-color 0.12s ease;
+}
+
+.c4-col-btn:hover:not(:disabled) {
+  background: hsla(40, 20%, 92%, 0.045);
+}
+
+.c4-col-btn:disabled {
+  cursor: default;
+}
+
+.c4-cell {
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  border-radius: 50%;
+  background: hsl(214, 20%, 10.5%);
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.65) inset;
+  position: relative;
+  overflow: hidden;
+}
+
+.c4-disc {
+  position: absolute;
+  inset: 6%;
+  border-radius: 50%;
+  transform: scale(0);
+  transition: transform 0.18s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.c4-disc.p1 {
+  background: var(--game-p1);
+  box-shadow:
+    0 2px 0 hsla(45, 100%, 86%, 0.35) inset,
+    0 -3px 0 hsla(20, 88%, 28%, 0.5) inset;
+  transform: scale(1);
+}
+
+.c4-disc.p2 {
+  background: var(--game-p2);
+  box-shadow:
+    0 2px 0 hsla(174, 95%, 86%, 0.35) inset,
+    0 -3px 0 hsla(176, 88%, 22%, 0.5) inset;
+  transform: scale(1);
+}
+
+.c4-disc.drop-anim {
+  animation: c4-drop-bounce 0.34s cubic-bezier(0.25, 1, 0.4, 1);
+}
+
+@keyframes c4-drop-bounce {
+  0% { transform: translateY(-280%) scale(0.96); }
+  70% { transform: translateY(0) scale(1); }
+  85% { transform: translateY(-14%) scale(1); }
+  100% { transform: translateY(0) scale(1); }
+}
+
+.c4-disc.win-highlight {
+  outline: 3px solid #ffffff;
+  outline-offset: -3px;
+  animation: win-throb 0.9s ease-in-out infinite;
+}
+
+@keyframes win-throb {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(0.91); }
+}
+
+/* ==========================================================================
+   GAME 3: Infinite & Classic Tic-Tac-Toe
+   ========================================================================== */
+.ttt-mode-bar {
+  display: inline-flex;
+  padding: 3px;
+  border-radius: var(--radius-xs);
+  background: var(--bg-well);
+  box-shadow: var(--shadow-well);
+  border: 1px solid var(--hairline);
+  gap: 4px;
+  flex-shrink: 0;
+  margin-bottom: 4px;
+}
+
+.ttt-mode-tab {
+  height: 30px;
+  padding: 0 12px;
+  border-radius: 6px;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  font-family: var(--font-sans);
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.14s ease, color 0.14s ease;
+}
+
+.ttt-mode-tab.active {
+  background: var(--bg-surface-3);
+  color: var(--text-primary);
+  box-shadow: var(--shadow-keycap);
+}
+
+.ttt-mode-tab:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.ttt-rule-note {
+  margin: 0 0 6px;
+  font-size: 0.76rem;
+  color: var(--text-secondary);
+  text-align: center;
+  flex-shrink: 0;
+}
+
+.ttt-board {
+  width: 320px;
+  height: 320px;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  grid-template-rows: repeat(3, 1fr);
+  gap: 9px;
+  padding: 12px;
+  border-radius: var(--radius-md);
+  background: var(--bg-surface-2);
+  border: 1px solid var(--hairline-strong);
+  box-shadow: var(--shadow-raised);
+  touch-action: manipulation;
+}
+
+.ttt-cell {
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--hairline);
+  background: var(--bg-well);
+  box-shadow: var(--shadow-well);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  padding: 0;
+  position: relative;
+  transition: background-color 0.12s ease, transform 0.08s ease;
+}
+
+.ttt-cell:hover:not(:disabled) {
+  background: var(--bg-surface-1);
+}
+
+.ttt-cell:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
+.ttt-cell:disabled {
+  cursor: default;
+}
+
+.ttt-cell svg {
+  width: 54%;
+  height: 54%;
+  animation: pop-in 0.18s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@keyframes pop-in {
+  from { transform: scale(0.5); opacity: 0; }
+  to { transform: scale(1); opacity: 1; }
+}
+
+.ttt-cell.vanishing-soon svg {
+  opacity: 0.36;
+  animation: vanish-warn 1.05s ease-in-out infinite;
+}
+
+.ttt-cell.vanishing-soon::after {
+  content: 'PRÓX.';
+  position: absolute;
+  bottom: 5px;
+  font-family: var(--font-mono);
+  font-size: 0.5rem;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+}
+
+@keyframes vanish-warn {
+  0%, 100% { opacity: 0.48; transform: scale(0.96); }
+  50% { opacity: 0.22; transform: scale(0.88); }
+}
+
+.ttt-cell.win-cell {
+  background: hsla(40, 25%, 94%, 0.12);
+}
+
+/* ==========================================================================
+   Match Result Floating Overlay (never pushes board off-screen!)
+   ========================================================================== */
+.result-overlay {
+  position: absolute;
+  bottom: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 30;
+  width: calc(100% - 16px);
+  max-width: 440px;
+  padding: 14px 16px;
+  border-radius: var(--radius-md);
+  background: hsla(214, 22%, 12%, 0.96);
+  color: #f4f1ea;
+  backdrop-filter: blur(8px);
+  border: 1px solid hsla(40, 20%, 92%, 0.16);
+  box-shadow: var(--shadow-raised);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+  animation: result-pop 0.18s ease-out;
+}
+
+.result-overlay .result-sub {
+  color: hsl(212, 14%, 72%);
+}
+
+@keyframes result-pop {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 10px);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+}
+
+.result-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.result-headline {
+  font-family: var(--font-display);
+  font-size: 1.02rem;
+  font-weight: 700;
+}
+
+.result-sub {
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+}
+
+.result-actions {
+  display: flex;
+  gap: 8px;
+}
+
+/* Mobile & Immersive Arena Breakpoints */
+@media (max-width: 820px), (max-height: 750px) {
+  body.in-game .topbar,
+  body.in-game .pc-sidebar,
+  body.in-game .pc-social-rail,
+  body.in-game .mobile-bottom-nav,
+  body.in-game .session-strip {
+    display: none !important;
+  }
+
+  .view-game {
+    padding: 6px 8px;
+    gap: 5px;
+  }
+
+  .hockey-help-caption {
+    display: none;
+  }
+}
+
+@media (max-height: 670px) {
+  .ttt-rule-note {
+    display: none;
+  }
+}
+
+@media (max-width: 640px) {
+  .stage-title {
+    display: none;
+  }
+
+  .stage-fs-label,
+  .stage-restart-label {
+    display: none;
+  }
+
+  .match-hud {
+    padding: 5px 9px;
+    margin-bottom: 4px;
+  }
+
+  .hockey-arena-frame {
+    padding: 6px;
+    border-radius: 18px;
+  }
+
+  .result-overlay {
+    flex-direction: column;
+    align-items: stretch;
+    text-align: center;
+  }
+
+  .result-actions {
+    justify-content: center;
+  }
+}
