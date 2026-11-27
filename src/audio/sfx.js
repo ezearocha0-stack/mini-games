@@ -199,6 +199,65 @@ class SoundEngine {
     this.tone({ freq: 660, endFreq: 880, duration: 0.09, type: 'sine', gain: 0.09 });
   }
 
+  cueStrike(power = 0.7) {
+    const p = Math.min(1.2, Math.max(0.25, power));
+    this.tone({ freq: 210 + p * 120, endFreq: 85, duration: 0.06, type: 'triangle', gain: 0.16 * p });
+    this.haptic(Math.round(8 * p));
+  }
+
+  ballClack(intensity = 0.7) {
+    const k = Math.min(1.2, Math.max(0.2, intensity));
+    this.tone({ freq: 720 + k * 240, endFreq: 340, duration: 0.038, type: 'triangle', gain: 0.12 * k });
+  }
+
+  pocketDrop() {
+    this.tone({ freq: 260, endFreq: 130, duration: 0.1, type: 'sine', gain: 0.14 });
+    this.tone({ freq: 520, endFreq: 420, duration: 0.08, type: 'triangle', gain: 0.1, delay: 0.05 });
+    this.haptic(14);
+  }
+
+  splash() {
+    this.tone({ freq: 340, endFreq: 150, duration: 0.14, type: 'sine', gain: 0.12 });
+    this.haptic(8);
+  }
+
+  explosion() {
+    this.tone({ freq: 185, endFreq: 52, duration: 0.22, type: 'sawtooth', gain: 0.16 });
+    this.tone({ freq: 120, endFreq: 42, duration: 0.2, type: 'triangle', gain: 0.14, delay: 0.04 });
+    this.haptic([24, 20, 28]);
+  }
+
+  radarPing() {
+    this.tone({ freq: 760, endFreq: 740, duration: 0.07, type: 'sine', gain: 0.08 });
+  }
+
+  chessMove(capture = false) {
+    if (capture) {
+      this.tone({ freq: 380, endFreq: 180, duration: 0.07, type: 'triangle', gain: 0.14 });
+      this.haptic(14);
+    } else {
+      this.tone({ freq: 280, endFreq: 190, duration: 0.05, type: 'sine', gain: 0.1 });
+      this.haptic(8);
+    }
+  }
+
+  checkAlert() {
+    this.tone({ freq: 620, duration: 0.08, type: 'triangle', gain: 0.13 });
+    this.tone({ freq: 830, duration: 0.12, type: 'triangle', gain: 0.14, delay: 0.09 });
+    this.haptic([15, 25, 15]);
+  }
+
+  correctGuess() {
+    this.tone({ freq: 523.25, duration: 0.09, type: 'triangle', gain: 0.14 });
+    this.tone({ freq: 659.25, duration: 0.1, type: 'triangle', gain: 0.14, delay: 0.08 });
+    this.tone({ freq: 783.99, duration: 0.15, type: 'triangle', gain: 0.15, delay: 0.16 });
+    this.haptic([16, 20, 22]);
+  }
+
+  brushPop() {
+    this.tone({ freq: 480, endFreq: 620, duration: 0.03, type: 'sine', gain: 0.045 });
+  }
+
   notification() {
     this.tone({ freq: 587.33, endFreq: 880, duration: 0.11, type: 'sine', gain: 0.08 });
   }

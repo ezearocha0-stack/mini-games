@@ -90,8 +90,8 @@ export function renderHomeView(state, actions) {
 
     <div class="section-heading">
       <div>
-        <h2>Juegos listos para jugar</h2>
-        <p>Motores originales conservados al 100% con Crossplay PC ↔ Android</p>
+        <h2>Juegos listos para jugar (8)</h2>
+        <p>Los 3 motores originales intactos + Billar 8-Ball, Mini Golf, Batalla Naval, Dibuja y Adivina y Ajedrez</p>
       </div>
       <button type="button" class="btn btn-subtle btn-compact" data-nav="juegos">Ver catálogo completo →</button>
     </div>

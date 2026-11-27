@@ -35,7 +35,14 @@ export default defineConfig({
     rollupOptions: {
       output: {
         manualChunks: {
-          'net-vendor': ['peerjs', 'qrcode']
+          'net-vendor': ['peerjs', 'qrcode'],
+          'games-pack': [
+            './src/games/eightBall.js',
+            './src/games/miniGolf.js',
+            './src/games/battleship.js',
+            './src/games/drawGuess.js',
+            './src/games/chess.js'
+          ]
         }
       }
     }

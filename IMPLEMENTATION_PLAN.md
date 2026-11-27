@@ -40,3 +40,11 @@ Este plan siguió las 8 fases manteniendo Vite 6, ES Modules, Node.js, PeerJS, W
 - [x] Mejorar `public/manifest.webmanifest` y `public/sw.js` (sin cachear `/api/*`, actualización segura fuera de partida, recuperación offline).
 - [x] Suite automatizada `tests/platform.test.mjs` (`npm.cmd test`), build (`npm.cmd run build`) y verificación en navegador escritorio (`1280×800`) y móvil (`390×844` / `844×390`).
 - [x] Actualizar `AUDIT.md`, `CHANGELOG.md`, `TESTING_LOG.md`, `README.md` y preparar subida a `https://github.com/ezearocha0-stack/mini-games.git`.
+
+## Fase 9 — Expansión del Catálogo (v2.1.0 · 8 Juegos Activos + 8 Slots Futuros)
+- [x] Conservar sin modificaciones `src/games/airHockey.js`, `src/games/connectFour.js` y `src/games/ticTacToe.js`.
+- [x] Implementar ELO multi-juego (`elo_by_game` en `server/db.js`, `server/elo.js`, `server/api.js` y `supabase/migrations/002_catalog_expansion.sql`) más 5 nuevas insignias competitivas.
+- [x] Implementar validación autoritativa en servidor (`server/wsRooms.js`): flotas ocultas de Batalla Naval, motor legal compartido de Ajedrez (`src/shared/chessEngine.js`), y sesiones/resultados para Billar 8-Ball, Mini Golf y Dibuja y Adivina.
+- [x] Desarrollar e integrar los 5 nuevos módulos independientes: `src/games/eightBall.js`, `src/games/miniGolf.js`, `src/games/battleship.js`, `src/games/drawGuess.js` y `src/games/chess.js`.
+- [x] Registrar 8 juegos activos + 8 slots futuros en `src/games/registry.js` con SVG propios, estilos adaptativos PC/Android, chunking en Vite (`games-pack`) y caché `minigames-pwa-v4`.
+- [x] Verificar `6/6` tests de integración, build de producción y pruebas interactivas reales en navegador escritorio y móvil.

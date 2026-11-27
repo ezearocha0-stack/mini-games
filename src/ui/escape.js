@@ -130,6 +130,65 @@ export function renderGameArtSvg(gameId) {
       <circle cx="103" cy="74" r="8.5" fill="none" stroke="#1ad1be" stroke-width="4"/>
     </svg>`;
   }
+  if (gameId === 'eight-ball') {
+    return `<svg viewBox="0 0 280 148" class="art-svg" aria-hidden="true">
+      <rect x="20" y="16" width="240" height="116" rx="14" fill="#3b2416" stroke="rgba(240,236,228,0.14)" stroke-width="2"/>
+      <rect x="30" y="26" width="220" height="96" rx="8" fill="#145c3e"/>
+      <circle cx="34" cy="30" r="8" fill="#090b0f"/><circle cx="140" cy="28" r="7" fill="#090b0f"/><circle cx="246" cy="30" r="8" fill="#090b0f"/>
+      <circle cx="34" cy="118" r="8" fill="#090b0f"/><circle cx="140" cy="120" r="7" fill="#090b0f"/><circle cx="246" cy="118" r="8" fill="#090b0f"/>
+      <line x1="48" y1="88" x2="100" y2="76" stroke="#d6a364" stroke-width="5" stroke-linecap="round"/>
+      <circle cx="114" cy="73" r="10" fill="#f4f1ea"/>
+      <circle cx="176" cy="74" r="11" fill="#11161d" stroke="rgba(255,255,255,0.22)" stroke-width="1.5"/>
+      <circle cx="176" cy="74" r="5" fill="#f4f1ea"/>
+      <circle cx="198" cy="60" r="10" fill="#f58229"/><circle cx="198" cy="88" r="10" fill="#2563eb"/>
+    </svg>`;
+  }
+  if (gameId === 'mini-golf') {
+    return `<svg viewBox="0 0 280 148" class="art-svg" aria-hidden="true">
+      <rect x="20" y="16" width="240" height="116" rx="16" fill="#14583b" stroke="rgba(240,236,228,0.12)" stroke-width="2"/>
+      <ellipse cx="148" cy="45" rx="34" ry="16" fill="#d8be7d" stroke="#a88c4c" stroke-width="1.5"/>
+      <rect x="115" y="92" width="48" height="24" rx="8" fill="#0f5c8a" stroke="#38bdf8" stroke-width="1.5"/>
+      <circle cx="72" cy="74" r="9" fill="#f58229" stroke="#fff" stroke-width="1.5"/>
+      <line x1="82" y1="74" x2="178" y2="74" stroke="#1ad1be" stroke-width="2.5" stroke-dasharray="5 5"/>
+      <circle cx="215" cy="74" r="12" fill="#090b0f" stroke="#f4f1ea" stroke-width="2"/>
+      <line x1="215" y1="74" x2="215" y2="30" stroke="#e2e8f0" stroke-width="2.5"/>
+      <polygon points="215,30 238,38 215,46" fill="#ef4444"/>
+    </svg>`;
+  }
+  if (gameId === 'battleship') {
+    return `<svg viewBox="0 0 280 148" class="art-svg" aria-hidden="true">
+      <rect x="34" y="14" width="212" height="120" rx="14" fill="#0d1722" stroke="rgba(56,189,248,0.22)" stroke-width="2"/>
+      <g stroke="rgba(56,189,248,0.12)" stroke-width="1">
+        <line x1="76" y1="22" x2="76" y2="126"/><line x1="118" y1="22" x2="118" y2="126"/>
+        <line x1="160" y1="22" x2="160" y2="126"/><line x1="202" y1="22" x2="202" y2="126"/>
+        <line x1="42" y1="48" x2="238" y2="48"/><line x1="42" y1="74" x2="238" y2="74"/><line x1="42" y1="100" x2="238" y2="100"/>
+      </g>
+      <rect x="64" y="64" width="126" height="22" rx="11" fill="#475569" stroke="#94a3b8" stroke-width="2"/>
+      <circle cx="96" cy="75" r="8" fill="#ef4444"/><circle cx="138" cy="75" r="8" fill="#f58229"/>
+      <circle cx="180" cy="36" r="5" fill="#38bdf8"/><circle cx="216" cy="112" r="5" fill="#38bdf8"/>
+    </svg>`;
+  }
+  if (gameId === 'draw-guess') {
+    return `<svg viewBox="0 0 280 148" class="art-svg" aria-hidden="true">
+      <rect x="28" y="14" width="224" height="120" rx="14" fill="#101419" stroke="rgba(240,236,228,0.14)" stroke-width="2"/>
+      <path d="M58 96 Q90 36 128 74 T192 52" fill="none" stroke="#1ad1be" stroke-width="5" stroke-linecap="round"/>
+      <circle cx="72" cy="48" r="10" fill="#f5b623"/>
+      <rect x="190" y="96" width="14" height="14" rx="4" fill="#f58229"/><rect x="210" y="96" width="14" height="14" rx="4" fill="#ef4444"/>
+      <path d="M188 76 L216 42 L224 49 L196 83 L185 86 Z" fill="#f4f1ea"/>
+    </svg>`;
+  }
+  if (gameId === 'chess') {
+    return `<svg viewBox="0 0 280 148" class="art-svg" aria-hidden="true">
+      <rect x="64" y="12" width="152" height="124" rx="12" fill="#1e242c" stroke="rgba(240,236,228,0.15)" stroke-width="2"/>
+      <rect x="76" y="22" width="32" height="25" fill="#d9cbb8"/><rect x="140" y="22" width="32" height="25" fill="#d9cbb8"/>
+      <rect x="108" y="47" width="32" height="25" fill="#d9cbb8"/><rect x="172" y="47" width="32" height="25" fill="#d9cbb8"/>
+      <rect x="76" y="72" width="32" height="25" fill="#d9cbb8"/><rect x="140" y="72" width="32" height="25" fill="#d9cbb8"/>
+      <rect x="108" y="97" width="32" height="25" fill="#d9cbb8"/><rect x="172" y="97" width="32" height="25" fill="#d9cbb8"/>
+      <path d="M140 34v10M135 39h10" stroke="#f58229" stroke-width="3" stroke-linecap="round"/>
+      <circle cx="140" cy="64" r="13" fill="#f8fafc" stroke="#1e242c" stroke-width="2"/>
+      <circle cx="172" cy="94" r="11" fill="#1ad1be" stroke="#101419" stroke-width="2"/>
+    </svg>`;
+  }
   return `<svg viewBox="0 0 280 148" class="art-svg" aria-hidden="true">
     <rect x="28" y="18" width="224" height="112" rx="16" fill="#101419" stroke="rgba(240,236,228,0.1)" stroke-width="2" stroke-dasharray="6 5"/>
     <circle cx="140" cy="74" r="24" fill="rgba(26,209,190,0.14)" stroke="#1ad1be" stroke-width="2"/>

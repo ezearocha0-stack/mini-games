@@ -4,6 +4,11 @@ import { getDb, areFriends, isBlockedBetween } from './db.js';
 import { extractSessionToken } from './auth.js';
 import { startCompetitiveSession, recordValidatedMatchResult } from './elo.js';
 import { getClientIp, rateLimiter, sanitizeText, sha256Hex } from './security.js';
+import {
+  createInitialChessState,
+  applyChessMove,
+  hasSufficientMatingMaterial
+} from '../src/shared/chessEngine.js';
 
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 const RECONNECT_GRACE_MS = 45_000;
@@ -112,7 +117,53 @@ export function getPublicRoomsList() {
   return list.sort((a, b) => b.createdAt - a.createdAt).slice(0, 40);
 }
 
-// Authoritative Shadow Board Helpers (Connect 4 & Tic-Tac-Toe)
+// Authoritative Shadow Board Helpers (All 8 Competitive Games)
+const EXPECTED_SHIP_SPECS = [
+  { id: 'carrier', name: 'Portaaviones', size: 5 },
+  { id: 'battleship', name: 'Acorazado', size: 4 },
+  { id: 'cruiser', name: 'Crucero', size: 3 },
+  { id: 'submarine', name: 'Submarino', size: 3 },
+  { id: 'destroyer', name: 'Destructor', size: 2 }
+];
+
+function validateAndNormalizeFleet(shipsRaw) {
+  if (!Array.isArray(shipsRaw) || shipsRaw.length !== 5) return null;
+  const used = new Set();
+  const normalized = [];
+
+  for (const spec of EXPECTED_SHIP_SPECS) {
+    const s = shipsRaw.find((x) => x && x.id === spec.id);
+    if (!s || !Array.isArray(s.cells) || s.cells.length !== spec.size) return null;
+    const cells = s.cells.map(([r, c]) => [Number(r), Number(c)]);
+    for (const [r, c] of cells) {
+      if (!Number.isInteger(r) || !Number.isInteger(c) || r < 0 || r > 9 || c < 0 || c > 9) {
+        return null;
+      }
+      const key = `${r},${c}`;
+      if (used.has(key)) return null;
+      used.add(key);
+    }
+    const allSameRow = cells.every(([r]) => r === cells[0][0]);
+    const allSameCol = cells.every(([, c]) => c === cells[0][1]);
+    if (!allSameRow && !allSameCol) return null;
+    const coords = (allSameRow ? cells.map(([, c]) => c) : cells.map(([r]) => r)).sort((a, b) => a - b);
+    for (let i = 1; i < coords.length; i++) {
+      if (coords[i] !== coords[i - 1] + 1) return null;
+    }
+    normalized.push({ id: spec.id, name: spec.name, size: spec.size, cells });
+  }
+  return used.size === 17 ? normalized : null;
+}
+
+function broadcastGamePacket(room, game, payload, excludeWs = null) {
+  const pkt = { type: 'GAME_EVENT', game, payload };
+  for (const m of room.members.values()) {
+    if (m.ws && m.ws !== excludeWs && m.ws.readyState === 1) {
+      safeSend(m.ws, { sys: 'PACKET', payload: pkt });
+    }
+  }
+}
+
 function createShadowMatch(room, gameId) {
   const players = [...room.members.values()].filter((m) => m.role === 'host' || m.role === 'guest');
   const p1 = players.find((m) => m.role === 'host');
@@ -137,7 +188,17 @@ function createShadowMatch(room, gameId) {
     tttVariant: 'infinite',
     tttBoard: Array(9).fill(0),
     tttQueues: { 1: [], 2: [] },
-    tttTurn: 1
+    tttTurn: 1,
+    bsFleets: { 1: null, 2: null },
+    bsShots: { 1: new Set(), 2: new Set() },
+    bsHitsOn: { 1: new Set(), 2: new Set() },
+    bsTurn: 1,
+    chessState: gameId === 'chess' ? createInitialChessState() : null,
+    chessClockSec: 300,
+    chessStartedAt: null,
+    ebShotsCount: 0,
+    mgHolesCompleted: 0,
+    dgSecretWord: ''
   };
 }
 
@@ -174,7 +235,8 @@ function checkShadowTttWin(b) {
 }
 
 function processCompetitiveEvent(room, senderRole, packet) {
-  if (!packet || typeof packet !== 'object') return;
+  const noSuppress = { suppressBroadcast: false };
+  if (!packet || typeof packet !== 'object') return noSuppress;
   if (packet.type === 'SELECT_GAME' && senderRole === 'host') {
     room.gameId = String(packet.gameId || 'air-hockey');
     room.activeMatch = createShadowMatch(room, room.gameId);
@@ -182,7 +244,7 @@ function processCompetitiveEvent(room, senderRole, packet) {
       if (m.ws) m.ws.activeGameName = room.gameId;
       if (m.userId) broadcastPresenceToFriends(m.userId);
     }
-    return;
+    return noSuppress;
   }
 
   if (packet.type === 'RETURN_HUB') {
@@ -191,19 +253,20 @@ function processCompetitiveEvent(room, senderRole, packet) {
       if (m.ws) m.ws.activeGameName = null;
       if (m.userId) broadcastPresenceToFriends(m.userId);
     }
-    return;
+    return noSuppress;
   }
 
-  if (packet.type !== 'GAME_EVENT' || !packet.payload) return;
+  if (packet.type !== 'GAME_EVENT' || !packet.payload) return noSuppress;
   const gameId = packet.game;
   const msg = packet.payload;
   if (!room.activeMatch || room.activeMatch.gameId !== gameId) {
     room.activeMatch = createShadowMatch(room, gameId);
   }
   const match = room.activeMatch;
-  if (!match) return;
+  if (!match) return noSuppress;
 
   if (msg.kind === 'RESTART') {
+    const prevClock = match.chessClockSec;
     room.activeMatch = createShadowMatch(room, gameId);
     if (gameId === 'connect-four' && (msg.starter === 1 || msg.starter === 2)) {
       room.activeMatch.c4Turn = msg.starter;
@@ -211,16 +274,36 @@ function processCompetitiveEvent(room, senderRole, packet) {
     if (gameId === 'tic-tac-toe' && (msg.starter === 1 || msg.starter === 2)) {
       room.activeMatch.tttTurn = msg.starter;
     }
-    return;
+    if (gameId === 'battleship' && (msg.starter === 1 || msg.starter === 2)) {
+      room.activeMatch.bsTurn = msg.starter;
+    }
+    if (gameId === 'chess') {
+      room.activeMatch.chessClockSec =
+        typeof msg.clockSec === 'number' ? Math.max(0, Math.min(3600, msg.clockSec)) : prevClock;
+    }
+    return noSuppress;
   }
 
-  if (match.recorded || !match.sessionId) return;
+  const recordMatch = (winnerSlot, scoreSummary) => {
+    if (match.recorded) return;
+    match.recorded = true;
+    if (match.sessionId) {
+      recordValidatedMatchResult({
+        sessionId: match.sessionId,
+        gameId,
+        winnerSlot,
+        scoreSummary
+      });
+    }
+  };
+
+  if (match.recorded) return noSuppress;
   const senderSlot = senderRole === 'host' ? 1 : 2;
 
   if (gameId === 'connect-four' && msg.kind === 'MOVE') {
     const col = Number(msg.col);
-    if (!Number.isInteger(col) || col < 0 || col >= 7) return;
-    if (senderSlot !== match.c4Turn) return;
+    if (!Number.isInteger(col) || col < 0 || col >= 7) return noSuppress;
+    if (senderSlot !== match.c4Turn) return noSuppress;
     let row = -1;
     for (let r = 5; r >= 0; r--) {
       if (match.c4Board[r][col] === 0) {
@@ -228,21 +311,18 @@ function processCompetitiveEvent(room, senderRole, packet) {
         break;
       }
     }
-    if (row === -1) return;
+    if (row === -1) return noSuppress;
     match.c4Board[row][col] = senderSlot;
     const outcome = checkShadowC4Win(match.c4Board);
     if (outcome) {
-      match.recorded = true;
-      recordValidatedMatchResult({
-        sessionId: match.sessionId,
-        gameId,
-        winnerSlot: outcome.winner,
-        scoreSummary: outcome.draw ? 'Empate' : `4 en línea (${senderSlot === 1 ? 'Naranja' : 'Turquesa'})`
-      });
+      recordMatch(
+        outcome.winner,
+        outcome.draw ? 'Empate' : `4 en línea (${senderSlot === 1 ? 'Naranja' : 'Turquesa'})`
+      );
     } else {
       match.c4Turn = match.c4Turn === 1 ? 2 : 1;
     }
-    return;
+    return noSuppress;
   }
 
   if (gameId === 'tic-tac-toe') {
@@ -251,12 +331,12 @@ function processCompetitiveEvent(room, senderRole, packet) {
       match.tttBoard = Array(9).fill(0);
       match.tttQueues = { 1: [], 2: [] };
       match.tttTurn = 1;
-      return;
+      return noSuppress;
     }
     if (msg.kind === 'MOVE') {
       const cell = Number(msg.cell);
-      if (!Number.isInteger(cell) || cell < 0 || cell > 8 || match.tttBoard[cell] !== 0) return;
-      if (senderSlot !== match.tttTurn) return;
+      if (!Number.isInteger(cell) || cell < 0 || cell > 8 || match.tttBoard[cell] !== 0) return noSuppress;
+      if (senderSlot !== match.tttTurn) return noSuppress;
       if (match.tttVariant === 'infinite' && match.tttQueues[senderSlot].length >= 3) {
         const old = match.tttQueues[senderSlot].shift();
         match.tttBoard[old] = 0;
@@ -265,41 +345,200 @@ function processCompetitiveEvent(room, senderRole, packet) {
       match.tttQueues[senderSlot].push(cell);
       const winner = checkShadowTttWin(match.tttBoard);
       if (winner) {
-        match.recorded = true;
-        recordValidatedMatchResult({
-          sessionId: match.sessionId,
-          gameId,
-          winnerSlot: winner,
-          scoreSummary: match.tttVariant === 'infinite' ? 'Tres en Raya Infinito' : 'Tres en Raya Clásico'
-        });
+        recordMatch(
+          winner,
+          match.tttVariant === 'infinite' ? 'Tres en Raya Infinito' : 'Tres en Raya Clásico'
+        );
       } else if (match.tttVariant === 'classic' && match.tttBoard.every((v) => v !== 0)) {
-        match.recorded = true;
-        recordValidatedMatchResult({
-          sessionId: match.sessionId,
-          gameId,
-          winnerSlot: 0,
-          scoreSummary: 'Empate Clásico'
-        });
+        recordMatch(0, 'Empate Clásico');
       } else {
         match.tttTurn = match.tttTurn === 1 ? 2 : 1;
       }
     }
-    return;
+    return noSuppress;
   }
 
   if (gameId === 'air-hockey' && msg.kind === 'GOAL_EVENT' && senderRole === 'host') {
     if (msg.phase === 'finished' && (msg.winner === 1 || msg.winner === 2)) {
       if (Date.now() - match.startedAt >= 4000) {
-        match.recorded = true;
-        recordValidatedMatchResult({
-          sessionId: match.sessionId,
-          gameId,
-          winnerSlot: Number(msg.winner),
-          scoreSummary: `${Number(msg.score1) || 0} - ${Number(msg.score2) || 0}`
-        });
+        recordMatch(Number(msg.winner), `${Number(msg.score1) || 0} - ${Number(msg.score2) || 0}`);
       }
     }
+    return noSuppress;
   }
+
+  // Batalla Naval: authoritative hidden fleet storage + turn-validated shot resolution
+  if (gameId === 'battleship') {
+    if (msg.kind === 'PLACE_FLEET') {
+      const fleet = validateAndNormalizeFleet(msg.ships);
+      if (!fleet) return { suppressBroadcast: true };
+      match.bsFleets[senderSlot] = fleet;
+      const bothReady = Boolean(match.bsFleets[1] && match.bsFleets[2]);
+      broadcastGamePacket(room, 'battleship', {
+        kind: 'FLEET_READY',
+        slot: senderSlot,
+        authoritative: true,
+        bothReady,
+        turn: match.bsTurn
+      });
+      return { suppressBroadcast: true };
+    }
+
+    if (msg.kind === 'FIRE') {
+      const r = Number(msg.r);
+      const c = Number(msg.c);
+      if (
+        !match.bsFleets[1] ||
+        !match.bsFleets[2] ||
+        senderSlot !== match.bsTurn ||
+        !Number.isInteger(r) ||
+        !Number.isInteger(c) ||
+        r < 0 ||
+        r > 9 ||
+        c < 0 ||
+        c > 9
+      ) {
+        return { suppressBroadcast: true };
+      }
+      const key = `${r},${c}`;
+      if (match.bsShots[senderSlot].has(key)) return { suppressBroadcast: true };
+      match.bsShots[senderSlot].add(key);
+
+      const targetSlot = senderSlot === 1 ? 2 : 1;
+      const targetFleet = match.bsFleets[targetSlot];
+      let hitShip = null;
+      for (const ship of targetFleet) {
+        if (ship.cells.some(([sr, sc]) => sr === r && sc === c)) {
+          hitShip = ship;
+          break;
+        }
+      }
+
+      const hit = Boolean(hitShip);
+      let sunkShip = null;
+      let winner = null;
+      if (hit) {
+        match.bsHitsOn[targetSlot].add(key);
+        const allShipHit = hitShip.cells.every(([sr, sc]) => match.bsHitsOn[targetSlot].has(`${sr},${sc}`));
+        if (allShipHit) {
+          sunkShip = { id: hitShip.id, name: hitShip.name, size: hitShip.size, cells: hitShip.cells };
+        }
+        if (match.bsHitsOn[targetSlot].size >= 17) {
+          winner = senderSlot;
+        }
+      }
+
+      match.bsTurn = winner ? senderSlot : targetSlot;
+      broadcastGamePacket(room, 'battleship', {
+        kind: 'SHOT_RESULT',
+        by: senderSlot,
+        r,
+        c,
+        hit,
+        sunkShip,
+        nextTurn: match.bsTurn,
+        winner,
+        authoritative: true
+      });
+
+      if (winner) {
+        recordMatch(winner, `Flota enemiga hundida (${match.bsHitsOn[targetSlot].size}/17)`);
+      }
+      return { suppressBroadcast: true };
+    }
+    return noSuppress;
+  }
+
+  // Ajedrez: FIDE move validation & clock outcomes
+  if (gameId === 'chess') {
+    if (!match.chessState) match.chessState = createInitialChessState();
+    if (msg.kind === 'SET_CLOCK' && senderRole === 'host' && match.chessState.history.length === 0) {
+      const sec = Number(msg.clockSec);
+      if (Number.isFinite(sec) && sec >= 0 && sec <= 3600) {
+        match.chessClockSec = Math.round(sec);
+      }
+      return noSuppress;
+    }
+    if (msg.kind === 'MOVE') {
+      const expectedSlot = match.chessState.turn === 'w' ? 1 : 2;
+      if (senderSlot !== expectedSlot) return { suppressBroadcast: true };
+      const res = applyChessMove(match.chessState, msg);
+      if (!res) return { suppressBroadcast: true };
+      match.chessState = res.state;
+      if (!match.chessStartedAt) match.chessStartedAt = Date.now();
+      if (res.state.status !== 'playing') {
+        recordMatch(
+          res.state.winner === 1 ? 1 : res.state.winner === 2 ? 2 : 0,
+          `${res.state.reason} (${res.state.history.length} jugadas)`
+        );
+      }
+      return noSuppress;
+    }
+    if (msg.kind === 'RESIGN') {
+      const winner = senderSlot === 1 ? 2 : 1;
+      recordMatch(winner, 'Rendición');
+      return noSuppress;
+    }
+    if (msg.kind === 'TIMEOUT' && match.chessClockSec > 0) {
+      const loserSlot = msg.loserSlot === 1 || msg.loserSlot === 2 ? msg.loserSlot : senderSlot;
+      const winnerSlot = loserSlot === 1 ? 2 : 1;
+      const winnerColor = winnerSlot === 1 ? 'w' : 'b';
+      const hasMat = hasSufficientMatingMaterial(match.chessState.board, winnerColor);
+      recordMatch(hasMat ? winnerSlot : 0, hasMat ? 'Victoria por tiempo' : 'Tablas (tiempo / material)');
+      return noSuppress;
+    }
+    return noSuppress;
+  }
+
+  // Billar 8-Ball
+  if (gameId === 'eight-ball') {
+    if (msg.kind === 'SHOOT') {
+      match.ebShotsCount = (match.ebShotsCount || 0) + 1;
+      return noSuppress;
+    }
+    if ((msg.kind === 'TURN_SETTLED' || msg.kind === 'MATCH_OVER') && (msg.winner === 1 || msg.winner === 2)) {
+      if ((match.ebShotsCount || 0) >= 1 && Date.now() - match.startedAt >= 2000) {
+        recordMatch(Number(msg.winner), String(msg.reason || 'Bola 8 embocada').slice(0, 40));
+      }
+    }
+    return noSuppress;
+  }
+
+  // Mini Golf
+  if (gameId === 'mini-golf') {
+    if (msg.kind === 'HOLE_NEXT') {
+      match.mgHolesCompleted = (match.mgHolesCompleted || 0) + 1;
+      return noSuppress;
+    }
+    if (msg.kind === 'COURSE_COMPLETE' && senderRole === 'host') {
+      const s1 = Number(msg.total1);
+      const s2 = Number(msg.total2);
+      if (Number.isFinite(s1) && Number.isFinite(s2) && s1 >= 6 && s2 >= 6) {
+        const winner = s1 < s2 ? 1 : s2 < s1 ? 2 : 0;
+        recordMatch(winner, `Tarjetas: ${s1} vs ${s2}`);
+      }
+    }
+    return noSuppress;
+  }
+
+  // Dibuja y Adivina
+  if (gameId === 'draw-guess') {
+    if (msg.kind === 'SECRET_WORD') {
+      match.dgSecretWord = String(msg.word || '').slice(0, 40);
+      return { suppressBroadcast: true };
+    }
+    if (msg.kind === 'GAME_OVER' && senderRole === 'host') {
+      const s1 = Number(msg.scores?.[1] ?? msg.score1 ?? 0);
+      const s2 = Number(msg.scores?.[2] ?? msg.score2 ?? 0);
+      if (Date.now() - match.startedAt >= 2000) {
+        const winner = s1 > s2 ? 1 : s2 > s1 ? 2 : 0;
+        recordMatch(winner, `Puntos: ${s1} - ${s2}`);
+      }
+    }
+    return noSuppress;
+  }
+
+  return noSuppress;
 }
 
 function serializeRoomState(room) {
@@ -773,7 +1012,10 @@ export function attachRoomWebSocketServer(httpServer) {
         ) {
           return;
         }
-        processCompetitiveEvent(room, ws.role, msg.payload);
+        const verdict = processCompetitiveEvent(room, ws.role, msg.payload);
+        if (verdict?.suppressBroadcast) {
+          return;
+        }
 
         for (const m of room.members.values()) {
           if (m.ws && m.ws !== ws && m.ws.readyState === 1) {

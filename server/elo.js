@@ -1,11 +1,40 @@
 import crypto from 'node:crypto';
-import { getDb, createNotification } from './db.js';
+import { getDb, createNotification, parseEloByGame } from './db.js';
+
+export const RANKED_GAMES = new Set([
+  'air-hockey',
+  'connect-four',
+  'tic-tac-toe',
+  'eight-ball',
+  'mini-golf',
+  'battleship',
+  'draw-guess',
+  'chess'
+]);
 
 const GAME_ELO_COLUMN = {
   'air-hockey': 'elo_hockey',
   'connect-four': 'elo_connect4',
   'tic-tac-toe': 'elo_tictactoe'
 };
+
+const GAME_ACHIEVEMENTS = {
+  'air-hockey': 'hockey_ace',
+  'connect-four': 'c4_tactician',
+  'tic-tac-toe': 'ttt_master',
+  'eight-ball': 'pool_shark',
+  'mini-golf': 'golf_pro',
+  battleship: 'admiral',
+  'draw-guess': 'artist_eye',
+  chess: 'grandmaster'
+};
+
+export function getUserGameElo(userRow, gameId) {
+  if (!userRow) return 1000;
+  if (gameId === 'global') return userRow.elo_global || 1000;
+  const map = parseEloByGame(userRow);
+  return map[gameId] || 1000;
+}
 
 function levelFromXp(xp) {
   return Math.floor(Math.sqrt(Math.max(0, xp) / 100)) + 1;
@@ -36,7 +65,7 @@ export function unlockAchievement(db, userId, achievementId) {
 }
 
 export function startCompetitiveSession({ roomCode, gameId, player1UserId, player2UserId }) {
-  if (!GAME_ELO_COLUMN[gameId] || !player1UserId || !player2UserId || player1UserId === player2UserId) {
+  if (!RANKED_GAMES.has(gameId) || !player1UserId || !player2UserId || player1UserId === player2UserId) {
     return null;
   }
   const db = getDb();
@@ -53,7 +82,7 @@ export function recordValidatedMatchResult({
   winnerSlot, // 1 | 2 | 0 (draw)
   scoreSummary = ''
 }) {
-  if (!sessionId || !GAME_ELO_COLUMN[gameId]) return null;
+  if (!sessionId || !RANKED_GAMES.has(gameId)) return null;
   const db = getDb();
   const sess = db.prepare('SELECT * FROM game_sessions WHERE id = ?').get(sessionId);
   if (!sess || sess.status !== 'active' || sess.game_id !== gameId) {
@@ -66,9 +95,8 @@ export function recordValidatedMatchResult({
   const p2 = db.prepare('SELECT * FROM users WHERE id = ?').get(sess.player2_id);
   if (!p1 || !p2) return null;
 
-  const col = GAME_ELO_COLUMN[gameId];
-  const r1 = p1[col] || 1000;
-  const r2 = p2[col] || 1000;
+  const r1 = getUserGameElo(p1, gameId);
+  const r2 = getUserGameElo(p2, gameId);
   const exp1 = expectedScore(r1, r2);
   const exp2 = expectedScore(r2, r1);
 
@@ -98,7 +126,11 @@ export function recordValidatedMatchResult({
   const xp2 = winnerSlot === 2 ? 60 : winnerSlot === 0 ? 30 : 20;
 
   const applyForPlayer = (u, won, draw, delta, gDelta, xpGain) => {
-    const nextGameElo = Math.max(100, (u[col] || 1000) + delta);
+    const map = parseEloByGame(u);
+    const nextGameElo = Math.max(100, (map[gameId] || 1000) + delta);
+    map[gameId] = nextGameElo;
+    const legacyCol = GAME_ELO_COLUMN[gameId];
+
     const nextGlobalElo = Math.max(100, (u.elo_global || 1000) + gDelta);
     const nextXp = (u.xp || 0) + xpGain;
     const nextLevel = levelFromXp(nextXp);
@@ -110,14 +142,11 @@ export function recordValidatedMatchResult({
     const nextBest = Math.max(u.best_streak || 0, nextStreak);
     const nextPlaytime = (u.playtime_seconds || 0) + Math.min(durationSec, 3600);
 
-    db.prepare(
-      `UPDATE users SET
-        ${col} = ?, elo_global = ?, xp = ?, level = ?,
-        wins = ?, losses = ?, draws = ?, matches_played = ?,
-        current_streak = ?, best_streak = ?, playtime_seconds = ?, updated_at = ?
-       WHERE id = ?`
-    ).run(
-      nextGameElo,
+    const legacyClause = legacyCol ? `${legacyCol} = ?, ` : '';
+    const params = [];
+    if (legacyCol) params.push(nextGameElo);
+    params.push(
+      JSON.stringify(map),
       nextGlobalElo,
       nextXp,
       nextLevel,
@@ -132,13 +161,20 @@ export function recordValidatedMatchResult({
       u.id
     );
 
+    db.prepare(
+      `UPDATE users SET
+        ${legacyClause}elo_by_game = ?, elo_global = ?, xp = ?, level = ?,
+        wins = ?, losses = ?, draws = ?, matches_played = ?,
+        current_streak = ?, best_streak = ?, playtime_seconds = ?, updated_at = ?
+       WHERE id = ?`
+    ).run(...params);
+
     if (nextWins >= 1) unlockAchievement(db, u.id, 'first_win');
     if (nextStreak >= 3) unlockAchievement(db, u.id, 'streak_3');
     if (nextStreak >= 5) unlockAchievement(db, u.id, 'streak_5');
     if (nextMatches >= 25) unlockAchievement(db, u.id, 'veteran_25');
-    if (gameId === 'air-hockey' && nextGameElo >= 1100) unlockAchievement(db, u.id, 'hockey_ace');
-    if (gameId === 'connect-four' && nextGameElo >= 1100) unlockAchievement(db, u.id, 'c4_tactician');
-    if (gameId === 'tic-tac-toe' && nextGameElo >= 1100) unlockAchievement(db, u.id, 'ttt_master');
+    const achId = GAME_ACHIEVEMENTS[gameId];
+    if (achId && nextGameElo >= 1100) unlockAchievement(db, u.id, achId);
   };
 
   db.exec('BEGIN');

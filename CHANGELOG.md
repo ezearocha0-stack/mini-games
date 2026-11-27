@@ -1,5 +1,21 @@
 # Changelog — Mini-Games Plataforma Gaming
 
+## [2.1.0] — 2026-11-27 · Expansión de Catálogo Crossplay (8 Juegos Activos + 8 Slots Futuros)
+
+### Añadido
+- **5 Nuevos Juegos Multijugador Crossplay (PC + Android)**:
+  1. **Billar 8-Ball (`src/games/eightBall.js`)**: Física 2D sub-stepped (`6×`), 16 bolas numeradas (`1–7` lisas, `8`, `9–15` rayadas), 6 troneras, control táctil de **efecto/spin** (corrido, retroceso, efecto lateral), faltas con **bola en mano**, IA táctica y auto-rotación en vertical móvil.
+  2. **Mini Golf Crossplay (`src/games/miniGolf.js`)**: Circuito de 6 hoyos variados (*Curva Esmeralda*, *Pinball Arcade*, *Puentes Gemelos*, *Cañón Turbo*, *Molino Sincronizado*, *Gran Final*) con bumpers, arena, lagunas de agua, rampas turbo, compuerta móvil, honda táctil y tarjeta de puntuación (`Par` total).
+  3. **Batalla Naval (`src/games/battleship.js`)**: Despliegue de flota de 5 barcos, rotación, auto-colocado, radar `10×10`, pestañas móviles en Android, cortina de privacidad en 2J local, IA *Hunt & Target* y **estado oculto validado en servidor** (`/ws`: las flotas no viajan al cliente rival; fallback con hash en PeerJS puro).
+  4. **Dibuja y Adivina (`src/games/drawGuess.js`)**: Lienzo vectorial en streaming (`STROKE_SEG`/`STROKE_COMMIT`), paleta de 8 colores, 3 grosores, borrador, deshacer/limpiar, 4 rondas alternas de 55s, pistas progresivas de letras, respuestas vía input o directamente en el **chat de partida**, e ilustraciones vectoriales dibujadas trazo a trazo en modo vs IA.
+  5. **Ajedrez Clásico (`src/games/chess.js`, `src/shared/chessEngine.js`)**: Reglas FIDE completas (enroque, captura al paso, coronación con selector, ahogado, triple repetición y 50 movimientos), **reloj configurable** (`3m`, `5m`, `10m`, `Sin reloj`), piezas SVG, IA Minimax alfa-beta y validación legal en servidor.
+- **ELO Multi-Juego y Nuevas Insignias (`server/db.js`, `server/elo.js`, `server/api.js`, `supabase/migrations/002_catalog_expansion.sql`)**: Soporte ELO independiente (`elo_by_game`), rankings por cualquiera de los 8 juegos activos y 5 nuevas insignias (`pool_shark`, `golf_pro`, `admiral`, `artist_eye`, `grandmaster`).
+- **8 Slots Futuros Preparados en `src/games/registry.js`**: Damas Internacionales, Dominó Clásico, Duelo de Cartas (UNO original), Parchís Crossplay, Tres en Raya Avanzado, Memoria Táctica, Escuadra Táctica y Arena de Preguntas.
+- **Arte SVG Dedicado, Chunking y Audio (`src/ui/escape.js`, `src/audio/sfx.js`, `vite.config.js`, `public/sw.js`)**: SVG propios en tarjetas, efectos de taco/bolas/agua/explosión/radar/ajedrez/acierto, chunk separado `games-pack` y caché PWA `minigames-pwa-v4`.
+
+### Conservado Íntegramente
+- `src/games/airHockey.js`, `src/games/connectFour.js` y `src/games/ticTacToe.js` sin cambios (`0` líneas modificadas).
+
 ## [2.0.0] — 2026-11-27 · Transformación a Plataforma Gaming Crossplay (PC + Android)
 
 ### Añadido

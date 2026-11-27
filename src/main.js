@@ -199,6 +199,8 @@ const matchChat = createMatchChatController({
   store,
   showToast,
   onSendMatchChat: (text) => {
+    const handledLocally = activeGameInstance?.onLocalChatGuess?.(text);
+    if (handledLocally) return;
     const id = store.getLocalIdentity();
     const packet = {
       type: 'ROOM_CHAT',
@@ -489,7 +491,10 @@ function handleNetPacket(packet) {
   }
 
   if (packet.type === 'ROOM_CHAT') {
-    matchChat.appendMessage(packet);
+    const intercepted = activeGameInstance?.onRemoteChatGuess?.(packet);
+    if (!intercepted) {
+      matchChat.appendMessage(packet);
+    }
     return;
   }
 
@@ -567,6 +572,7 @@ function launchGame(gameId, mode, fromRemote = false) {
     mode,
     isHost,
     isSpectator,
+    isServerRelay: mode === 'online' && p2p.transport === 'ws',
     controlSensitivity: store.getState().settings.airHockeySensitivity || 1,
     localPlayerIndex,
     players: getMatchPlayers(mode),
@@ -728,8 +734,11 @@ function handlePlayRequest(gameId, explicitMode = null) {
   }
 
   pendingGameForModal = gameId;
-  el.modalModeTitle.textContent = getGameById(gameId)?.title || 'Jugar';
+  const spec = getGameById(gameId);
+  el.modalModeTitle.textContent = spec?.title || 'Jugar';
   el.modalModeSubtitle.textContent = 'Selecciona cómo quieres jugar esta partida';
+  el.btnModeAi?.classList.toggle('hidden', spec ? !spec.supportsAi : false);
+  el.btnModeLocal?.classList.toggle('hidden', spec ? !spec.supportsLocal : false);
   el.modalModePicker.classList.remove('hidden');
 }
 

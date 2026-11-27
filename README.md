@@ -4,19 +4,28 @@ Plataforma web multijugador **Crossplay P2P** y **PWA instalable** diseñada par
 
 ---
 
-## Juegos incluidos (Motores originales conservados)
+## Catálogo de Juegos (8 Activos Crossplay + 8 Próximos Slots)
 
+### Juegos Originales Conservados
 1. **Neo Air Hockey (60 FPS · Tiempo real)**
    - Física 2D con `3×` sub-stepping, estelas, chispas de impacto y respuesta háptica en Android.
    - **Perspectiva simétrica**: cada jugador defiende siempre su portería en la parte inferior de su pantalla.
    - Controles: ratón, `WASD`/flechas en PC (con sensibilidad configurable), arrastre táctil directo y multitáctil 2J en el mismo dispositivo.
-   - Predicción local de golpeo del invitado + canal UDP rápido (`RTCDataChannel` / `VOLATILE`).
 2. **Conecta 4 Táctico (7×6)**
    - Vista previa de columna, caída con rebote, teclado (`1`–`7`, flechas, `Enter`/`Space`), toque directo e IA Minimax con poda alfa-beta.
 3. **Tres en Raya (Infinito + Clásico)**
    - **Modo Infinito (sin empates)**: máximo 3 marcas activas por jugador; al colocar la 4.ª desaparece la más antigua.
    - **Modo Clásico** 3×3 tradicional e IA para ambos modos.
-4. **Arquitectura modular para próximos juegos (`src/games/registry.js`)**: slots preparados para Billar 8-Ball, Mini Golf, Batalla Naval y Dibuja y Adivina.
+
+### Nuevos Juegos Integrados (v2.1.0)
+4. **Billar 8-Ball (`src/games/eightBall.js`)**: Física 2D con 16 bolas, 6 troneras, control de efecto/spin, faltas con bola en mano, IA táctica y rotación automática en vertical móvil.
+5. **Mini Golf Crossplay (`src/games/miniGolf.js`)**: Circuito de 6 hoyos con obstáculos (arena, agua, bumpers, rampas turbo, compuerta móvil), honda táctil y tarjeta de puntuación.
+6. **Batalla Naval (`src/games/battleship.js`)**: Flota de 5 barcos en cuadrícula `10×10`, flotas ocultas validadas en servidor (`/ws`), cortina de privacidad en 2J local e IA *Hunt & Target*.
+7. **Dibuja y Adivina (`src/games/drawGuess.js`)**: Dibujo vectorial en streaming por rondas de 55s, pistas progresivas, chat integrado de respuestas e ilustraciones automáticas en modo vs IA.
+8. **Ajedrez Clásico (`src/games/chess.js`)**: Reglas FIDE completas (`src/shared/chessEngine.js`), reloj configurable (`3m`, `5m`, `10m`, libre), IA Minimax alfa-beta y validación en servidor.
+
+### Próximos Slots Preparados (`src/games/registry.js`)
+- Damas Internacionales, Dominó Clásico, Duelo de Cartas (UNO original), Parchís Crossplay, Tres en Raya Avanzado, Memoria Táctica, Escuadra Táctica y Arena de Preguntas.
 
 ---
 

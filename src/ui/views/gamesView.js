@@ -17,8 +17,10 @@ export function renderGamesView(state) {
   const q = searchTerm.trim().toLowerCase();
 
   const filtered = GAME_DEFINITIONS.filter((g) => {
-    if (activeFilter === 'realtime' && g.category !== 'realtime') return false;
-    if (activeFilter === 'turns' && g.category !== 'turns') return false;
+    if (activeFilter === 'active' && g.status !== 'active') return false;
+    if (activeFilter === 'realtime' && g.category !== 'realtime' && g.category !== 'physics') return false;
+    if (activeFilter === 'turns' && g.category !== 'turns' && g.category !== 'strategy') return false;
+    if (activeFilter === 'party' && g.category !== 'party') return false;
     if (activeFilter === 'favorites' && !favorites.has(g.id)) return false;
     if (activeFilter === 'upcoming' && g.status !== 'upcoming') return false;
     if (q && !g.title.toLowerCase().includes(q) && !g.description.toLowerCase().includes(q)) {
@@ -31,7 +33,7 @@ export function renderGamesView(state) {
     <div class="section-heading">
       <div>
         <h2>Catálogo de Juegos</h2>
-        <p>Toca cualquier juego activo para iniciar Online P2P, contra la IA o en pantalla compartida</p>
+        <p>8 juegos Crossplay jugables al instante (Online P2P, IA o Local) + 8 expansiones preparadas</p>
       </div>
       <div style="min-width:min(280px,100%);">
         <input
@@ -47,11 +49,13 @@ export function renderGamesView(state) {
 
     <div class="filter-tabs" role="tablist" aria-label="Filtrar catálogo">
       ${[
-        ['all', 'Todos'],
-        ['realtime', 'Tiempo Real'],
-        ['turns', 'Por Turnos'],
+        ['all', `Todos (${GAME_DEFINITIONS.length})`],
+        ['active', 'Jugables (8)'],
+        ['realtime', 'Física y Tiempo Real'],
+        ['turns', 'Estrategia y Turnos'],
+        ['party', 'Social y Mesa'],
         ['favorites', `Favoritos (${favorites.size})`],
-        ['upcoming', 'Próximos']
+        ['upcoming', 'Próximos (8)']
       ]
         .map(
           ([key, label]) => `

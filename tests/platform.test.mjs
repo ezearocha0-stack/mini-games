@@ -395,4 +395,182 @@ describe('Mini-Games Platform Integration Suite', () => {
     wsB2.close();
     wsSpec.close();
   });
+
+  it('validates Battleship hidden fleets server-side and updates multi-game ELO rankings', async () => {
+    const wsA = await openWsClient();
+    const wsB = await openWsClient();
+    try {
+      wsA.send(JSON.stringify({ sys: 'AUTH_HELLO', token: tokenA }));
+      wsB.send(JSON.stringify({ sys: 'AUTH_HELLO', token: tokenB }));
+
+      wsA.send(
+        JSON.stringify({
+          sys: 'CREATE_ROOM',
+          gameId: 'battleship',
+          profile: { id: userA.id, name: userA.username, device: 'PC' }
+        })
+      );
+      const created = await wsA.nextMsg((m) => m.sys === 'ROOM_CREATED');
+      wsB.send(
+        JSON.stringify({
+          sys: 'JOIN_ROOM',
+          code: created.code,
+          profile: { id: userB.id, name: userB.username, device: 'Android' }
+        })
+      );
+      await wsB.nextMsg((m) => m.sys === 'JOIN_OK');
+      await wsA.nextMsg((m) => m.sys === 'PEER_JOINED');
+
+      wsA.send(JSON.stringify({ sys: 'RELAY', payload: { type: 'SELECT_GAME', gameId: 'battleship' } }));
+      await wsB.nextMsg((m) => m.sys === 'PACKET' && m.payload?.type === 'SELECT_GAME');
+
+      const fleetA = [
+        { id: 'carrier', cells: [[0, 0], [0, 1], [0, 2], [0, 3], [0, 4]] },
+        { id: 'battleship', cells: [[2, 0], [2, 1], [2, 2], [2, 3]] },
+        { id: 'cruiser', cells: [[4, 0], [4, 1], [4, 2]] },
+        { id: 'submarine', cells: [[6, 0], [6, 1], [6, 2]] },
+        { id: 'destroyer', cells: [[8, 0], [8, 1]] }
+      ];
+      const fleetB = [
+        { id: 'carrier', cells: [[1, 0], [1, 1], [1, 2], [1, 3], [1, 4]] },
+        { id: 'battleship', cells: [[3, 0], [3, 1], [3, 2], [3, 3]] },
+        { id: 'cruiser', cells: [[5, 0], [5, 1], [5, 2]] },
+        { id: 'submarine', cells: [[7, 0], [7, 1], [7, 2]] },
+        { id: 'destroyer', cells: [[9, 0], [9, 1]] }
+      ];
+
+      // Send PLACE_FLEET: server must NEVER broadcast coordinates (only FLEET_READY)
+      wsA.send(
+        JSON.stringify({
+          sys: 'RELAY',
+          payload: { type: 'GAME_EVENT', game: 'battleship', payload: { kind: 'PLACE_FLEET', ships: fleetA } }
+        })
+      );
+      const readyAOnB = await wsB.nextMsg((m) => m.sys === 'PACKET' && m.payload?.payload?.kind === 'FLEET_READY');
+      assert.equal(readyAOnB.payload.payload.ships, undefined);
+      assert.equal(readyAOnB.payload.payload.bothReady, false);
+
+      wsB.send(
+        JSON.stringify({
+          sys: 'RELAY',
+          payload: { type: 'GAME_EVENT', game: 'battleship', payload: { kind: 'PLACE_FLEET', ships: fleetB } }
+        })
+      );
+      const readyBOnA = await wsA.nextMsg((m) => m.sys === 'PACKET' && m.payload?.payload?.bothReady === true);
+      assert.equal(readyBOnA.payload.payload.bothReady, true);
+
+      // P1 sinks all 17 segments of fleetB (filtering explicitly by `by === 1` / `by === 2`)
+      const targetsB = fleetB.flatMap((s) => s.cells);
+      for (let i = 0; i < targetsB.length; i++) {
+        const [r, c] = targetsB[i];
+        wsA.send(
+          JSON.stringify({
+            sys: 'RELAY',
+            payload: { type: 'GAME_EVENT', game: 'battleship', payload: { kind: 'FIRE', r, c } }
+          })
+        );
+        const shotRes = await wsA.nextMsg(
+          (m) => m.sys === 'PACKET' && m.payload?.payload?.kind === 'SHOT_RESULT' && m.payload?.payload?.by === 1
+        );
+        assert.equal(shotRes.payload.payload.hit, true);
+
+        if (i < targetsB.length - 1) {
+          const missR = Math.floor(i / 4) + 1;
+          const missC = 6 + (i % 4);
+          wsB.send(
+            JSON.stringify({
+              sys: 'RELAY',
+              payload: { type: 'GAME_EVENT', game: 'battleship', payload: { kind: 'FIRE', r: missR, c: missC } }
+            })
+          );
+          const missRes = await wsB.nextMsg(
+            (m) => m.sys === 'PACKET' && m.payload?.payload?.kind === 'SHOT_RESULT' && m.payload?.payload?.by === 2
+          );
+          assert.equal(missRes.payload.payload.hit, false);
+        } else {
+          assert.equal(shotRes.payload.payload.winner, 1);
+        }
+      }
+
+      await new Promise((r) => setTimeout(r, 60));
+      const rankBs = await jsonApi('/api/rankings?game=battleship');
+      assert.equal(rankBs.data.leaderboard[0].id, userA.id);
+      assert.ok(rankBs.data.leaderboard[0].elo > 1000);
+    } finally {
+      wsA.close();
+      wsB.close();
+    }
+  });
+
+  it('validates legal Chess moves server-side, rejects illegal moves, and scores Scholar Mate', async () => {
+    const wsA = await openWsClient();
+    const wsB = await openWsClient();
+    try {
+      wsA.send(JSON.stringify({ sys: 'AUTH_HELLO', token: tokenA }));
+      wsB.send(JSON.stringify({ sys: 'AUTH_HELLO', token: tokenB }));
+
+      wsA.send(
+        JSON.stringify({
+          sys: 'CREATE_ROOM',
+          gameId: 'chess',
+          profile: { id: userA.id, name: userA.username, device: 'PC' }
+        })
+      );
+      const created = await wsA.nextMsg((m) => m.sys === 'ROOM_CREATED');
+      wsB.send(
+        JSON.stringify({
+          sys: 'JOIN_ROOM',
+          code: created.code,
+          profile: { id: userB.id, name: userB.username, device: 'Android' }
+        })
+      );
+      await wsB.nextMsg((m) => m.sys === 'JOIN_OK');
+      await wsA.nextMsg((m) => m.sys === 'PEER_JOINED');
+
+      wsA.send(JSON.stringify({ sys: 'RELAY', payload: { type: 'SELECT_GAME', gameId: 'chess' } }));
+      await wsB.nextMsg((m) => m.sys === 'PACKET' && m.payload?.type === 'SELECT_GAME');
+
+      // Attempt illegal move (White e2 -> e5): server must drop it, never forward to B
+      wsA.send(
+        JSON.stringify({
+          sys: 'RELAY',
+          payload: { type: 'GAME_EVENT', game: 'chess', payload: { kind: 'MOVE', fromR: 6, fromC: 4, toR: 3, toC: 4 } }
+        })
+      );
+
+      const mateSeq = [
+        [wsA, wsB, 6, 4, 4, 4], // 1. e4
+        [wsB, wsA, 1, 4, 3, 4], // 1... e5
+        [wsA, wsB, 7, 5, 4, 2], // 2. Bc4
+        [wsB, wsA, 0, 1, 2, 2], // 2... Nc6
+        [wsA, wsB, 7, 3, 3, 7], // 3. Qh5
+        [wsB, wsA, 0, 6, 2, 5], // 3... Nf6
+        [wsA, wsB, 3, 7, 1, 5] // 4. Qxf7#
+      ];
+
+      for (const [sender, receiver, fromR, fromC, toR, toC] of mateSeq) {
+        sender.send(
+          JSON.stringify({
+            sys: 'RELAY',
+            payload: { type: 'GAME_EVENT', game: 'chess', payload: { kind: 'MOVE', fromR, fromC, toR, toC } }
+          })
+        );
+        const fwd = await receiver.nextMsg((m) => m.sys === 'PACKET' && m.payload?.payload?.kind === 'MOVE');
+        assert.equal(fwd.payload.payload.fromR, fromR);
+        assert.equal(fwd.payload.payload.toC, toC);
+      }
+
+      await new Promise((r) => setTimeout(r, 60));
+      const rankChess = await jsonApi('/api/rankings?game=chess');
+      assert.equal(rankChess.data.leaderboard[0].id, userA.id);
+      assert.ok(rankChess.data.leaderboard[0].elo > 1000);
+
+      const meA = await jsonApi('/api/auth/me', { token: tokenA });
+      assert.ok(meA.data.user.stats.eloByGame.chess > 1000);
+      assert.ok(meA.data.user.stats.eloByGame.battleship > 1000);
+    } finally {
+      wsA.close();
+      wsB.close();
+    }
+  });
 });

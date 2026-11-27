@@ -61,27 +61,35 @@ export function renderPlayView(state) {
         </button>
       </div>
 
-      <div class="surface-card">
-        <span class="pill">Un Jugador</span>
-        <h3 style="margin:10px 0 6px;">Desafío contra IA</h3>
-        <p style="margin:0 0 14px;color:var(--text-secondary);font-size:0.85rem;">
-          Entrena sin internet contra física táctica en Air Hockey o Minimax alfa-beta en Conecta 4 y Tres en Raya.
-        </p>
-        <button type="button" class="btn btn-secondary btn-block" data-direct-play="${escapeHtml(game.id)}:ai">
-          Jugar contra IA
-        </button>
-      </div>
+      ${
+        game.supportsAi
+          ? `<div class="surface-card">
+               <span class="pill">Un Jugador</span>
+               <h3 style="margin:10px 0 6px;">Desafío contra IA</h3>
+               <p style="margin:0 0 14px;color:var(--text-secondary);font-size:0.85rem;">
+                 Entrena sin internet contra la IA táctica adaptada a ${escapeHtml(game.shortTitle)}.
+               </p>
+               <button type="button" class="btn btn-secondary btn-block" data-direct-play="${escapeHtml(game.id)}:ai">
+                 Jugar contra IA
+               </button>
+             </div>`
+          : ''
+      }
 
-      <div class="surface-card">
-        <span class="pill">Pantalla Compartida</span>
-        <h3 style="margin:10px 0 6px;">2 Jugadores Locales</h3>
-        <p style="margin:0 0 14px;color:var(--text-secondary);font-size:0.85rem;">
-          Multitáctil simultáneo en Android/tablet o controles compartidos en PC en el mismo dispositivo.
-        </p>
-        <button type="button" class="btn btn-subtle btn-block" data-direct-play="${escapeHtml(game.id)}:local">
-          Jugar 2J Local
-        </button>
-      </div>
+      ${
+        game.supportsLocal
+          ? `<div class="surface-card">
+               <span class="pill">Pantalla Compartida</span>
+               <h3 style="margin:10px 0 6px;">2 Jugadores Locales</h3>
+               <p style="margin:0 0 14px;color:var(--text-secondary);font-size:0.85rem;">
+                 Multitáctil simultáneo o juego por turnos compartido en el mismo dispositivo.
+               </p>
+               <button type="button" class="btn btn-subtle btn-block" data-direct-play="${escapeHtml(game.id)}:local">
+                 Jugar 2J Local
+               </button>
+             </div>`
+          : ''
+      }
     </div>
 
     <div class="surface-card soft">

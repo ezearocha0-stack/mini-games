@@ -11,8 +11,24 @@ const STATIC_ACHIEVEMENTS = [
   ['hockey_ace', 'As del Air Hockey', 'Alcanza 1100 ELO en Neo Air Hockey.', '🏒'],
   ['c4_tactician', 'Estratega 7×6', 'Alcanza 1100 ELO en Conecta 4 Táctico.', '🟡'],
   ['ttt_master', 'Mente Infinita', 'Alcanza 1100 ELO en Tres en Raya.', '❌'],
+  ['pool_shark', 'Maestro del Taco', 'Alcanza 1100 ELO en Billar 8-Ball.', '🎱'],
+  ['golf_pro', 'Bajo Par', 'Alcanza 1100 ELO en Mini Golf.', '⛳'],
+  ['admiral', 'Almirante Táctico', 'Alcanza 1100 ELO en Batalla Naval.', '🚢'],
+  ['artist_eye', 'Mente Creativa', 'Alcanza 1100 ELO en Dibuja y Adivina.', '🎨'],
+  ['grandmaster', 'Gran Maestro', 'Alcanza 1100 ELO en Ajedrez.', '♟️'],
   ['veteran_25', 'Veterano Crossplay', 'Completa 25 partidas competitivas.', '🎖️'],
   ['social_butterfly', 'Conector', 'Agrega a tu primer amigo en la plataforma.', '🤝']
+];
+
+const RANKED_GAME_IDS = [
+  'air-hockey',
+  'connect-four',
+  'tic-tac-toe',
+  'eight-ball',
+  'mini-golf',
+  'battleship',
+  'draw-guess',
+  'chess'
 ];
 
 export function getDb() {
@@ -47,6 +63,7 @@ export function getDb() {
       elo_hockey INTEGER NOT NULL DEFAULT 1000,
       elo_connect4 INTEGER NOT NULL DEFAULT 1000,
       elo_tictactoe INTEGER NOT NULL DEFAULT 1000,
+      elo_by_game TEXT NOT NULL DEFAULT '{}',
       wins INTEGER NOT NULL DEFAULT 0,
       losses INTEGER NOT NULL DEFAULT 0,
       draws INTEGER NOT NULL DEFAULT 0,
@@ -216,6 +233,11 @@ export function getDb() {
     );
   `);
 
+  const userCols = db.prepare('PRAGMA table_info(users)').all().map((c) => c.name);
+  if (!userCols.includes('elo_by_game')) {
+    db.exec("ALTER TABLE users ADD COLUMN elo_by_game TEXT NOT NULL DEFAULT '{}'");
+  }
+
   const insertAch = db.prepare(
     'INSERT OR IGNORE INTO achievements (id, name, description, icon) VALUES (?, ?, ?, ?)'
   );
@@ -254,6 +276,22 @@ export function getUserBadges(db, userId) {
   }));
 }
 
+export function parseEloByGame(row) {
+  let map = {};
+  try {
+    const parsed = JSON.parse(row?.elo_by_game || '{}');
+    if (parsed && typeof parsed === 'object') map = { ...parsed };
+  } catch {}
+  if (typeof row?.elo_hockey === 'number' && !map['air-hockey']) map['air-hockey'] = row.elo_hockey;
+  if (typeof row?.elo_connect4 === 'number' && !map['connect-four']) map['connect-four'] = row.elo_connect4;
+  if (typeof row?.elo_tictactoe === 'number' && !map['tic-tac-toe']) map['tic-tac-toe'] = row.elo_tictactoe;
+  const out = {};
+  for (const id of RANKED_GAME_IDS) {
+    out[id] = Number.isFinite(Number(map[id])) ? Number(map[id]) : 1000;
+  }
+  return out;
+}
+
 export function toPublicUser(row, db = null) {
   if (!row) return null;
   const total = row.matches_played || 0;
@@ -262,6 +300,7 @@ export function toPublicUser(row, db = null) {
   try {
     favs = JSON.parse(row.favorite_games || '[]');
   } catch {}
+  const eloByGame = parseEloByGame(row);
   return {
     id: row.id,
     publicId: row.public_id,
@@ -276,9 +315,10 @@ export function toPublicUser(row, db = null) {
     presenceStatus: row.presence_status || 'offline',
     stats: {
       eloGlobal: row.elo_global || 1000,
-      eloHockey: row.elo_hockey || 1000,
-      eloConnect4: row.elo_connect4 || 1000,
-      eloTicTacToe: row.elo_tictactoe || 1000,
+      eloHockey: eloByGame['air-hockey'] || 1000,
+      eloConnect4: eloByGame['connect-four'] || 1000,
+      eloTicTacToe: eloByGame['tic-tac-toe'] || 1000,
+      eloByGame,
       wins: row.wins || 0,
       losses: row.losses || 0,
       draws: row.draws || 0,

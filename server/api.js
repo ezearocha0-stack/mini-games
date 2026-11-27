@@ -29,7 +29,7 @@ import {
   sha256Hex
 } from './security.js';
 import { pushToUser, getOnlinePresenceForUser, getPublicRoomsList } from './wsRooms.js';
-import { unlockAchievement } from './elo.js';
+import { unlockAchievement, RANKED_GAMES, getUserGameElo } from './elo.js';
 
 function sendJson(res, status, data) {
   res.writeHead(status, {
@@ -365,29 +365,20 @@ export async function handleApiRequest(req, res) {
 
     // Public Leaderboard & Match Rankings
     if (pathname === '/api/rankings' && method === 'GET') {
-      const game = url.searchParams.get('game') || 'global';
-      const col =
-        game === 'air-hockey'
-          ? 'elo_hockey'
-          : game === 'connect-four'
-            ? 'elo_connect4'
-            : game === 'tic-tac-toe'
-              ? 'elo_tictactoe'
-              : 'elo_global';
+      const requested = url.searchParams.get('game') || 'global';
+      const game = requested === 'global' || RANKED_GAMES.has(requested) ? requested : 'global';
 
       const rows = db
         .prepare(
-          `SELECT id, public_id, tag, username, avatar_color, avatar_icon, level, wins, losses, matches_played, best_streak, ${col} AS elo
+          `SELECT id, public_id, tag, username, avatar_color, avatar_icon, level, wins, losses, matches_played, best_streak,
+                  elo_global, elo_hockey, elo_connect4, elo_tictactoe, elo_by_game
            FROM users
-           WHERE email_verified = 1 AND matches_played > 0
-           ORDER BY ${col} DESC, wins DESC
-           LIMIT 50`
+           WHERE email_verified = 1 AND matches_played > 0`
         )
         .all();
 
-      return sendJson(res, 200, {
-        game,
-        leaderboard: rows.map((r) => ({
+      const leaderboard = rows
+        .map((r) => ({
           id: r.id,
           publicId: r.public_id,
           tag: r.tag,
@@ -395,12 +386,18 @@ export async function handleApiRequest(req, res) {
           avatarColor: r.avatar_color,
           avatarIcon: r.avatar_icon,
           level: r.level,
-          elo: r.elo,
+          elo: game === 'global' ? r.elo_global : getUserGameElo(r, game),
           wins: r.wins,
           losses: r.losses,
           winRate: r.matches_played > 0 ? Math.round((r.wins / r.matches_played) * 100) : 0,
           bestStreak: r.best_streak
         }))
+        .sort((a, b) => b.elo - a.elo || b.wins - a.wins)
+        .slice(0, 50);
+
+      return sendJson(res, 200, {
+        game,
+        leaderboard
       });
     }
 
