@@ -56,7 +56,6 @@ function checkWin(board) {
   return null;
 }
 
-// Alpha-Beta AI evaluation for Connect 4
 function scoreWindow(w, aiPlayer) {
   const human = aiPlayer === 1 ? 2 : 1;
   let aiCount = 0;
@@ -78,12 +77,9 @@ function scoreWindow(w, aiPlayer) {
 
 function evaluateBoard(board, aiPlayer) {
   let score = 0;
-  // Center column control
   for (let r = 0; r < ROWS; r++) {
     if (board[r][3] === aiPlayer) score += 6;
   }
-
-  // Horizontal
   for (let r = 0; r < ROWS; r++) {
     for (let c = 0; c < COLS - 3; c++) {
       score += scoreWindow(
@@ -92,7 +88,6 @@ function evaluateBoard(board, aiPlayer) {
       );
     }
   }
-  // Vertical
   for (let c = 0; c < COLS; c++) {
     for (let r = 0; r < ROWS - 3; r++) {
       score += scoreWindow(
@@ -101,7 +96,6 @@ function evaluateBoard(board, aiPlayer) {
       );
     }
   }
-  // Diagonals
   for (let r = 0; r < ROWS - 3; r++) {
     for (let c = 0; c < COLS - 3; c++) {
       score += scoreWindow(
@@ -180,7 +174,7 @@ export function createConnectFourGame(ctx) {
   let nextStarter = 1;
   let finished = false;
   let winningCells = [];
-  let lastPlaced = null; // { r, c }
+  let lastPlaced = null;
   let hoverCol = 3;
   let aiTimer = null;
 
@@ -207,9 +201,11 @@ export function createConnectFourGame(ctx) {
         </div>
       </div>
 
-      <div class="c4-board-shell">
-        <div class="c4-preview-row" id="c4-preview-row" aria-hidden="true"></div>
-        <div class="c4-grid" id="c4-grid" role="grid" aria-label="Tablero de Conecta 4"></div>
+      <div class="board-stage-box" id="c4-stage-box">
+        <div class="c4-board-shell" id="c4-board-shell">
+          <div class="c4-preview-row" id="c4-preview-row" aria-hidden="true"></div>
+          <div class="c4-grid" id="c4-grid" role="grid" aria-label="Tablero de Conecta 4"></div>
+        </div>
       </div>
 
       <div class="hockey-help-caption">
@@ -229,6 +225,8 @@ export function createConnectFourGame(ctx) {
     </div>
   `;
 
+  const stageBox = mountEl.querySelector('#c4-stage-box');
+  const boardShell = mountEl.querySelector('#c4-board-shell');
   const previewRowEl = mountEl.querySelector('#c4-preview-row');
   const gridEl = mountEl.querySelector('#c4-grid');
   const side1El = mountEl.querySelector('#c4-side-1');
@@ -243,7 +241,21 @@ export function createConnectFourGame(ctx) {
   const resultTitle = mountEl.querySelector('#c4-result-title');
   const resultSub = mountEl.querySelector('#c4-result-sub');
 
-  // Build preview slots & 7 interactive column buttons
+  // Dynamically fit 7x6 rack + preview row inside exact mobile stage height
+  function fitBoardToStage() {
+    const rect = stageBox.getBoundingClientRect();
+    const availW = Math.max(220, (rect.width || window.innerWidth) - 4);
+    const availH = Math.max(210, (rect.height || window.innerHeight - 130) - 4);
+    // Shell height ~= shellWidth * (6/7) + 46px (padding + preview row)
+    const maxWidthFromHeight = Math.floor((availH - 46) * (7 / 6));
+    const finalW = Math.max(210, Math.min(500, availW, maxWidthFromHeight));
+    boardShell.style.width = `${finalW}px`;
+  }
+
+  const resizeObserver =
+    typeof ResizeObserver !== 'undefined' ? new ResizeObserver(() => fitBoardToStage()) : null;
+  resizeObserver?.observe(stageBox);
+
   const previewSlots = [];
   const colButtons = [];
   const cellDiscs = Array.from({ length: ROWS }, () => Array(COLS).fill(null));
@@ -403,16 +415,10 @@ export function createConnectFourGame(ctx) {
 
     hoverCol = col;
     if (mode === 'online') {
-      if (isHost) {
-        const ok = applyMove(col, 1);
-        if (ok) {
-          sendNet({ kind: 'MOVE', col, player: 1 });
-        }
-      } else {
-        const ok = applyMove(col, 2);
-        if (ok) {
-          sendNet({ kind: 'MOVE', col, player: 2 });
-        }
+      const actingPlayer = isHost ? 1 : 2;
+      const ok = applyMove(col, actingPlayer);
+      if (ok) {
+        sendNet({ kind: 'MOVE', col, player: actingPlayer });
       }
     } else {
       applyMove(col, turn);
@@ -507,9 +513,11 @@ export function createConnectFourGame(ctx) {
   });
 
   window.addEventListener('keydown', onKeyDown);
+  window.addEventListener('resize', fitBoardToStage);
 
   renderBoard();
   updateHud();
+  requestAnimationFrame(() => fitBoardToStage());
 
   return {
     onNetMessage(msg) {
@@ -530,7 +538,9 @@ export function createConnectFourGame(ctx) {
 
     destroy() {
       clearTimeout(aiTimer);
+      resizeObserver?.disconnect();
       window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('resize', fitBoardToStage);
     }
   };
 }

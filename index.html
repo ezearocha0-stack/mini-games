@@ -340,17 +340,33 @@
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true">
                 <path d="m15 18-6-6 6-6" stroke-linecap="round" stroke-linejoin="round"/>
               </svg>
-              <span>Juegos</span>
+              <span>Salir</span>
             </button>
 
             <div class="stage-title-group">
               <h2 id="stage-game-title" class="stage-title">Neo Air Hockey</h2>
-              <span id="stage-mode-badge" class="stage-badge">Online P2P</span>
+              <span id="stage-mode-badge" class="stage-badge">Online</span>
             </div>
 
             <div class="stage-controls" id="stage-extra-controls">
-              <button id="btn-restart-match" class="btn btn-subtle btn-compact" type="button">
-                Reiniciar
+              <div class="stage-mini-reactions hidden" id="stage-mini-reactions">
+                <button type="button" class="reaction-btn" data-react="🔥" aria-label="Enviar fuego">🔥</button>
+                <button type="button" class="reaction-btn" data-react="👏" aria-label="Enviar aplauso">👏</button>
+              </div>
+              <button
+                id="btn-stage-fullscreen"
+                class="btn btn-subtle btn-compact"
+                type="button"
+                title="Pantalla completa"
+                aria-label="Pantalla completa"
+              >
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true">
+                  <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+                <span class="stage-fs-label">Pantalla completa</span>
+              </button>
+              <button id="btn-restart-match" class="btn btn-subtle btn-compact" type="button" title="Reiniciar partida">
+                ↻ <span class="stage-restart-label">Reiniciar</span>
               </button>
             </div>
           </div>

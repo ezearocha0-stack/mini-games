@@ -4,7 +4,7 @@ const H = 1.62; // Logical table height (width = 1.0)
 const PUCK_R = 0.042;
 const MALLET_R = 0.072;
 const GOAL_HALF = 0.185; // Goal spans x in [0.5 - GOAL_HALF, 0.5 + GOAL_HALF]
-const MAX_MALLET_SPEED = 2.75;
+const MAX_MALLET_SPEED = 2.85;
 const MAX_PUCK_SPEED = 2.85;
 const FRICTION = 0.994;
 const WIN_SCORE = 7;
@@ -14,7 +14,17 @@ function clamp(val, min, max) {
 }
 
 export function createAirHockeyGame(ctx) {
-  const { mountEl, mode, isHost, localPlayerIndex, sendNet, onMatchWin, onRequestHub } = ctx;
+  const {
+    mountEl,
+    mode,
+    isHost,
+    localPlayerIndex,
+    sendNet,
+    sendFastNet,
+    onMatchWin,
+    onRequestHub
+  } = ctx;
+  const fastSend = sendFastNet || sendNet;
   let players = { ...ctx.players };
 
   // Guest in online mode sees table rotated 180deg so own goal is always at bottom
@@ -43,8 +53,10 @@ export function createAirHockeyGame(ctx) {
         </div>
       </div>
 
-      <div class="hockey-arena-frame" id="hk-frame">
-        <canvas id="hk-canvas" class="hockey-canvas" width="380" height="615"></canvas>
+      <div class="hockey-stage-box" id="hk-stage-box">
+        <div class="hockey-arena-frame" id="hk-frame">
+          <canvas id="hk-canvas" class="hockey-canvas" width="340" height="550"></canvas>
+        </div>
       </div>
 
       <div class="hockey-help-caption" id="hk-help"></div>
@@ -62,6 +74,7 @@ export function createAirHockeyGame(ctx) {
     </div>
   `;
 
+  const stageBox = mountEl.querySelector('#hk-stage-box');
   const canvas = mountEl.querySelector('#hk-canvas');
   const g = canvas.getContext('2d');
   const scoreEl = mountEl.querySelector('#hk-score-text');
@@ -78,37 +91,45 @@ export function createAirHockeyGame(ctx) {
   const btnHub = mountEl.querySelector('#hk-btn-hub');
 
   if (mode === 'local') {
-    helpEl.textContent = 'Multitáctil (1 en cada mitad) o en PC: Ratón/WASD (Abajo) vs Flechas (Arriba)';
+    helpEl.textContent =
+      'Multitáctil (1 en cada mitad) o en PC: Ratón/WASD (Abajo) vs Flechas (Arriba)';
   } else {
-    helpEl.textContent = 'PC: Mueve con ratón o WASD · Android: Desliza el dedo en tu mitad inferior';
+    helpEl.textContent = 'PC: Ratón o WASD · Móvil: Desliza el dedo en tu mitad inferior';
   }
 
-  // Canonical state (P1 at bottom y ~ 1.38, P2 at top y ~ 0.24)
+  // Canonical state (P1 at bottom y ~ 1.40, P2 at top y ~ 0.22)
   const state = {
     p1: { x: 0.5, y: H - 0.22, vx: 0, vy: 0, tx: 0.5, ty: H - 0.22 },
     p2: { x: 0.5, y: 0.22, vx: 0, vy: 0, tx: 0.5, ty: 0.22 },
     puck: { x: 0.5, y: H / 2, vx: 0, vy: 0 },
     score1: 0,
     score2: 0,
-    phase: 'countdown', // 'countdown' | 'playing' | 'goal_pause' | 'finished'
-    countdown: 2.1,
+    phase: 'countdown', // 'countdown' | 'playing' | 'finished'
+    countdown: 2.0,
     winner: 0,
-    serveTo: 0 // 0 neutral, 1 towards P1, 2 towards P2
+    serveTo: 0
   };
 
-  // Visual effects (local)
+  // Visual effects
   const trail = [];
   const sparks = [];
   let flashAlpha = 0;
   let flashColor = '#f58229';
   let lastCountdownBeep = 4;
 
-  // Guest interpolation target
+  // Low-latency synchronization state
+  let snapSeq = 0;
+  let lastRxSnapSeq = 0;
+  let inputSeq = 0;
+  let lastRxInputSeq = 0;
+  let guestHitSeq = 0;
+  let lastRxGuestHitSeq = 0;
+  let guestHitHoldUntil = 0; // Prevents stale pre-hit snapshots from pulling puck back on Guest
+  let hostIgnoreP2CollideUntil = 0;
+
   const netTarget = {
     p1x: 0.5,
     p1y: H - 0.22,
-    p2x: 0.5,
-    p2y: 0.22,
     px: 0.5,
     py: H / 2,
     pvx: 0,
@@ -116,13 +137,13 @@ export function createAirHockeyGame(ctx) {
     hasSnapshot: false
   };
 
-  // Input tracking
-  const activePointers = new Map(); // pointerId -> 'p1' | 'p2' | 'mine'
+  // Input & sizing tracking
+  const activePointers = new Map();
   const keys = new Set();
   let lastInputSentAt = 0;
   let lastSnapSentAt = 0;
-  let logicalPxWidth = 360;
-  let logicalPxHeight = Math.round(360 * H);
+  let logicalPxWidth = 320;
+  let logicalPxHeight = Math.round(320 * H);
   let dpr = Math.min(window.devicePixelRatio || 1, 2);
 
   function refreshHudLabels() {
@@ -138,8 +159,8 @@ export function createAirHockeyGame(ctx) {
       roleBottomEl.textContent = 'Tú';
       roleTopEl.textContent = 'CPU Táctica';
     } else {
-      roleBottomEl.textContent = 'Jugador 1 (Sur)';
-      roleTopEl.textContent = 'Jugador 2 (Norte)';
+      roleBottomEl.textContent = 'Jugador 1';
+      roleTopEl.textContent = 'Jugador 2';
     }
     refreshScoreText();
   }
@@ -152,23 +173,26 @@ export function createAirHockeyGame(ctx) {
 
   function resizeCanvas() {
     dpr = Math.min(window.devicePixelRatio || 1, 2);
-    const viewportH = window.innerHeight;
-    const viewportW = window.innerWidth;
-    const reservedVertical = viewportW < 640 ? 225 : 250;
-    const maxH = Math.max(330, Math.min(680, viewportH - reservedVertical));
-    const maxW = Math.max(250, Math.min(440, viewportW - 44));
+    const boxRect = stageBox.getBoundingClientRect();
+    // Measure exact real available stage space (subtracting 18px for arena bezel)
+    const availW = Math.max(170, (boxRect.width || window.innerWidth - 24) - 18);
+    const availH = Math.max(220, (boxRect.height || window.innerHeight - 130) - 18);
 
-    let width = Math.min(maxW, maxH / H);
-    let height = width * H;
+    const width = Math.floor(Math.min(440, availW, availH / H));
+    const height = Math.floor(width * H);
 
-    logicalPxWidth = Math.round(width);
-    logicalPxHeight = Math.round(height);
+    logicalPxWidth = Math.max(160, width);
+    logicalPxHeight = Math.max(250, height);
 
     canvas.style.width = `${logicalPxWidth}px`;
     canvas.style.height = `${logicalPxHeight}px`;
     canvas.width = Math.round(logicalPxWidth * dpr);
     canvas.height = Math.round(logicalPxHeight * dpr);
   }
+
+  const resizeObserver =
+    typeof ResizeObserver !== 'undefined' ? new ResizeObserver(() => resizeCanvas()) : null;
+  resizeObserver?.observe(stageBox);
 
   function spawnSparks(cx, cy, color, count = 10) {
     for (let i = 0; i < count; i++) {
@@ -201,10 +225,15 @@ export function createAirHockeyGame(ctx) {
     state.p2.vy = 0;
 
     state.puck.x = 0.5;
-    state.puck.y =
-      serveTowards === 1 ? H * 0.6 : serveTowards === 2 ? H * 0.4 : H * 0.5;
+    state.puck.y = serveTowards === 1 ? H * 0.6 : serveTowards === 2 ? H * 0.4 : H * 0.5;
     state.puck.vx = 0;
     state.puck.vy = 0;
+
+    netTarget.px = state.puck.x;
+    netTarget.py = state.puck.y;
+    netTarget.pvx = 0;
+    netTarget.pvy = 0;
+    guestHitHoldUntil = 0;
     trail.length = 0;
   }
 
@@ -212,7 +241,7 @@ export function createAirHockeyGame(ctx) {
     const angleSpread = (Math.random() - 0.5) * 0.7;
     const dirY =
       state.serveTo === 1 ? 1 : state.serveTo === 2 ? -1 : Math.random() < 0.5 ? 1 : -1;
-    const speed = 0.68;
+    const speed = 0.7;
     state.puck.vx = Math.sin(angleSpread) * speed;
     state.puck.vy = Math.cos(angleSpread) * speed * dirY;
   }
@@ -222,15 +251,15 @@ export function createAirHockeyGame(ctx) {
     let sx = (clientX - rect.left) / rect.width;
     let sy = ((clientY - rect.top) / rect.height) * H;
     if (isTouch) {
-      // Slight ergonomic lift so finger pad doesn't obscure mallet
-      sy -= 0.055;
+      // Slight ergonomic lift so finger pad doesn't cover the mallet
+      sy -= 0.05;
     }
     sx = clamp(sx, MALLET_R, 1 - MALLET_R);
     sy = clamp(sy, MALLET_R, H - MALLET_R);
     if (flipView) {
-      return { x: 1 - sx, y: H - sy, screenY: sy };
+      return { x: 1 - sx, y: H - sy };
     }
-    return { x: sx, y: sy, screenY: sy };
+    return { x: sx, y: sy };
   }
 
   function applyLocalTarget(side, cx, cy) {
@@ -243,31 +272,34 @@ export function createAirHockeyGame(ctx) {
     }
   }
 
+  function sendGuestInputNow() {
+    const now = performance.now();
+    if (now - lastInputSentAt >= 14) {
+      lastInputSentAt = now;
+      fastSend({
+        kind: 'INPUT',
+        seq: ++inputSeq,
+        tx: +state.p2.tx.toFixed(4),
+        ty: +state.p2.ty.toFixed(4)
+      });
+    }
+  }
+
   function handlePointerInput(e, isDown = false) {
     const isTouch = e.pointerType === 'touch';
     if (!isTouch && e.type === 'pointermove' && mode === 'local' && e.buttons === 0) {
-      // On PC local mode, mouse freely controls bottom player
       const pt = screenToTableCoords(e.clientX, e.clientY, false);
       applyLocalTarget('p1', pt.x, pt.y);
       return;
     }
 
     if (mode !== 'local') {
-      // Online or vs AI: pointer always controls our own mallet
       if (!isTouch || activePointers.has(e.pointerId) || isDown) {
         if (isDown) activePointers.set(e.pointerId, 'mine');
         const pt = screenToTableCoords(e.clientX, e.clientY, isTouch);
         if (mode === 'online' && !isHost) {
-          // Constrain to P2 canonical half (top)
-          const tx = clamp(pt.x, MALLET_R, 1 - MALLET_R);
-          const ty = clamp(pt.y, MALLET_R, H / 2 - MALLET_R * 0.95);
-          state.p2.tx = tx;
-          state.p2.ty = ty;
-          const now = performance.now();
-          if (now - lastInputSentAt >= 15) {
-            lastInputSentAt = now;
-            sendNet({ kind: 'INPUT', tx, ty });
-          }
+          applyLocalTarget('p2', pt.x, pt.y);
+          sendGuestInputNow();
         } else {
           applyLocalTarget('p1', pt.x, pt.y);
         }
@@ -275,7 +307,7 @@ export function createAirHockeyGame(ctx) {
       return;
     }
 
-    // Local 2P multitouch: assign pointer to P1 (bottom) or P2 (top) based on touch start half
+    // Local 2P multitouch
     const rect = canvas.getBoundingClientRect();
     const rawSy = ((e.clientY - rect.top) / rect.height) * H;
     if (isDown) {
@@ -284,7 +316,7 @@ export function createAirHockeyGame(ctx) {
     }
     const assigned = activePointers.get(e.pointerId);
     if (assigned) {
-      const offsetY = isTouch ? (assigned === 'p1' ? rawSy - 0.055 : rawSy + 0.055) : rawSy;
+      const offsetY = isTouch ? (assigned === 'p1' ? rawSy - 0.05 : rawSy + 0.05) : rawSy;
       const sx = clamp((e.clientX - rect.left) / rect.width, MALLET_R, 1 - MALLET_R);
       applyLocalTarget(assigned, sx, offsetY);
     }
@@ -325,9 +357,8 @@ export function createAirHockeyGame(ctx) {
 
   function updateKeyboardTargets(dt) {
     if (keys.size === 0) return;
-    const kbSpeed = 1.45 * dt;
+    const kbSpeed = 1.48 * dt;
 
-    // In Online/AI mode, both WASD and Arrows move local player's mallet (in screen space!)
     if (mode !== 'local') {
       let dx = 0;
       let dy = 0;
@@ -338,20 +369,14 @@ export function createAirHockeyGame(ctx) {
       if (dx === 0 && dy === 0) return;
 
       if (flipView) {
-        state.p2.tx = clamp(state.p2.tx - dx, MALLET_R, 1 - MALLET_R);
-        state.p2.ty = clamp(state.p2.ty - dy, MALLET_R, H / 2 - MALLET_R * 0.95);
-        const now = performance.now();
-        if (now - lastInputSentAt >= 16) {
-          lastInputSentAt = now;
-          sendNet({ kind: 'INPUT', tx: state.p2.tx, ty: state.p2.ty });
-        }
+        applyLocalTarget('p2', state.p2.tx - dx, state.p2.ty - dy);
+        sendGuestInputNow();
       } else {
         applyLocalTarget('p1', state.p1.tx + dx, state.p1.ty + dy);
       }
       return;
     }
 
-    // Local 2P on PC: WASD -> P1 (bottom), Arrows -> P2 (top)
     let dx1 = 0;
     let dy1 = 0;
     if (keys.has('KeyA')) dx1 -= kbSpeed;
@@ -375,17 +400,17 @@ export function createAirHockeyGame(ctx) {
     let targetY = 0.2;
 
     if (puck.y < H * 0.54) {
-      // Attack / intercept when puck enters top half
       targetX = clamp(puck.x + puck.vx * 0.08, MALLET_R + 0.03, 1 - MALLET_R - 0.03);
       if (puck.y < state.p2.y - 0.02) {
-        // Retreat toward goal if puck got behind AI
         targetY = clamp(puck.y - 0.08, MALLET_R, 0.22);
-        targetX = puck.x < 0.5 ? clamp(puck.x + 0.1, MALLET_R, 0.9) : clamp(puck.x - 0.1, 0.1, 1 - MALLET_R);
+        targetX =
+          puck.x < 0.5
+            ? clamp(puck.x + 0.1, MALLET_R, 0.9)
+            : clamp(puck.x - 0.1, 0.1, 1 - MALLET_R);
       } else {
         targetY = clamp(puck.y - 0.015, MALLET_R + 0.02, H / 2 - MALLET_R * 1.15);
       }
     } else {
-      // Defend goal crease tracking puck X softly
       targetX = clamp(0.5 + (puck.x - 0.5) * 0.55, 0.28, 0.72);
       targetY = 0.2;
     }
@@ -416,7 +441,7 @@ export function createAirHockeyGame(ctx) {
     m.y = ny;
   }
 
-  function collideMalletPuck(m, colorHex) {
+  function collideMalletPuck(m, colorHex, reportAsGuestStrike = false) {
     const p = state.puck;
     let dx = p.x - m.x;
     let dy = p.y - m.y;
@@ -432,9 +457,8 @@ export function createAirHockeyGame(ctx) {
       const nx = dx / dist;
       const ny = dy / dist;
 
-      // Push puck out of overlap
-      p.x = m.x + nx * (minDist + 0.0015);
-      p.y = m.y + ny * (minDist + 0.0015);
+      p.x = m.x + nx * (minDist + 0.0018);
+      p.y = m.y + ny * (minDist + 0.0018);
 
       const rvx = p.vx - m.vx;
       const rvy = p.vy - m.vy;
@@ -443,14 +467,13 @@ export function createAirHockeyGame(ctx) {
       if (velAlongNormal < 0) {
         const restitution = 0.92;
         const impulse = -(1 + restitution) * velAlongNormal;
-        p.vx += impulse * nx + m.vx * 0.22;
-        p.vy += impulse * ny + m.vy * 0.22;
+        p.vx += impulse * nx + m.vx * 0.24;
+        p.vy += impulse * ny + m.vy * 0.24;
 
-        // Minimum pop so gentle touches still feel crisp
         const speed = Math.hypot(p.vx, p.vy);
-        if (speed < 0.55) {
-          p.vx = nx * 0.55;
-          p.vy = ny * 0.55;
+        if (speed < 0.56) {
+          p.vx = nx * 0.56;
+          p.vy = ny * 0.56;
         } else if (speed > MAX_PUCK_SPEED) {
           p.vx = (p.vx / speed) * MAX_PUCK_SPEED;
           p.vy = (p.vy / speed) * MAX_PUCK_SPEED;
@@ -460,17 +483,116 @@ export function createAirHockeyGame(ctx) {
         sfx.puckHit(hitStrength);
         spawnSparks(m.x + nx * MALLET_R, m.y + ny * MALLET_R, colorHex, 9);
 
-        if (mode === 'online' && isHost) {
+        if (reportAsGuestStrike) {
+          // Split-Half Strike Authority: Guest struck puck on top half -> instant 0ms local feel + notify Host
+          guestHitHoldUntil = performance.now() + 240;
+          sendNet({
+            kind: 'GUEST_HIT',
+            seq: ++guestHitSeq,
+            px: +p.x.toFixed(4),
+            py: +p.y.toFixed(4),
+            pvx: +p.vx.toFixed(3),
+            pvy: +p.vy.toFixed(3),
+            hx: +(m.x + nx * MALLET_R).toFixed(3),
+            hy: +(m.y + ny * MALLET_R).toFixed(3),
+            s: +hitStrength.toFixed(2)
+          });
+        } else if (mode === 'online' && isHost) {
           sendNet({
             kind: 'FX_HIT',
-            x: m.x + nx * MALLET_R,
-            y: m.y + ny * MALLET_R,
+            x: +(m.x + nx * MALLET_R).toFixed(3),
+            y: +(m.y + ny * MALLET_R).toFixed(3),
             c: colorHex,
-            s: hitStrength
+            s: +hitStrength.toFixed(2)
           });
+        }
+        return true;
+      }
+    }
+    return false;
+  }
+
+  // Shared puck rail bounce step (returns 1 or 2 if entered goal mouth, 0 otherwise)
+  function stepPuckAndWalls(subDt, checkGoals = true) {
+    const p = state.puck;
+    p.x += p.vx * subDt;
+    p.y += p.vy * subDt;
+
+    const damp = Math.pow(FRICTION, subDt * 60);
+    p.vx *= damp;
+    p.vy *= damp;
+
+    if (p.x < PUCK_R) {
+      p.x = PUCK_R;
+      p.vx = Math.abs(p.vx) * 0.94;
+      sfx.wallHit(Math.abs(p.vx) * 0.45);
+    } else if (p.x > 1 - PUCK_R) {
+      p.x = 1 - PUCK_R;
+      p.vx = -Math.abs(p.vx) * 0.94;
+      sfx.wallHit(Math.abs(p.vx) * 0.45);
+    }
+
+    const inGoalMouth =
+      p.x > 0.5 - GOAL_HALF + PUCK_R * 0.35 && p.x < 0.5 + GOAL_HALF - PUCK_R * 0.35;
+
+    if (inGoalMouth) {
+      if (checkGoals && p.y < -PUCK_R * 0.35) return 1;
+      if (checkGoals && p.y > H + PUCK_R * 0.35) return 2;
+    } else {
+      if (p.y < PUCK_R) {
+        p.y = PUCK_R;
+        p.vy = Math.abs(p.vy) * 0.94;
+        if (p.x < 0.12) p.vx += 0.18;
+        if (p.x > 0.88) p.vx -= 0.18;
+        sfx.wallHit(Math.abs(p.vy) * 0.45);
+      } else if (p.y > H - PUCK_R) {
+        p.y = H - PUCK_R;
+        p.vy = -Math.abs(p.vy) * 0.94;
+        if (p.x < 0.12) p.vx += 0.18;
+        if (p.x > 0.88) p.vx -= 0.18;
+        sfx.wallHit(Math.abs(p.vy) * 0.45);
+      }
+    }
+
+    const posts = [
+      { x: 0.5 - GOAL_HALF, y: 0 },
+      { x: 0.5 + GOAL_HALF, y: 0 },
+      { x: 0.5 - GOAL_HALF, y: H },
+      { x: 0.5 + GOAL_HALF, y: H }
+    ];
+    for (const post of posts) {
+      const dx = p.x - post.x;
+      const dy = p.y - post.y;
+      const dist = Math.hypot(dx, dy);
+      if (dist < PUCK_R && dist > 1e-5) {
+        const nx = dx / dist;
+        const ny = dy / dist;
+        p.x = post.x + nx * PUCK_R;
+        p.y = post.y + ny * PUCK_R;
+        const dot = p.vx * nx + p.vy * ny;
+        if (dot < 0) {
+          p.vx -= 1.9 * dot * nx;
+          p.vy -= 1.9 * dot * ny;
+          sfx.wallHit(0.55);
         }
       }
     }
+    return 0;
+  }
+
+  function sendAuthoritativeSnapNow() {
+    fastSend({
+      kind: 'SNAP',
+      seq: ++snapSeq,
+      p1x: +state.p1.x.toFixed(4),
+      p1y: +state.p1.y.toFixed(4),
+      px: +state.puck.x.toFixed(4),
+      py: +state.puck.y.toFixed(4),
+      pvx: +state.puck.vx.toFixed(3),
+      pvy: +state.puck.vy.toFixed(3),
+      ph: state.phase,
+      cd: +state.countdown.toFixed(2)
+    });
   }
 
   function handleGoal(scorer) {
@@ -492,7 +614,7 @@ export function createAirHockeyGame(ctx) {
       onMatchWin?.(state.winner);
     } else {
       state.phase = 'countdown';
-      state.serveTo = scorer === 1 ? 2 : 1; // Loser of point receives serve area
+      state.serveTo = scorer === 1 ? 2 : 1;
       state.countdown = 1.6;
       lastCountdownBeep = 3;
       resetPositions(state.serveTo);
@@ -511,7 +633,7 @@ export function createAirHockeyGame(ctx) {
     }
   }
 
-  function stepAuthoritativePhysics(dt) {
+  function stepAuthoritativePhysics(dt, now) {
     if (state.phase === 'finished') return;
 
     if (mode === 'ai') {
@@ -535,6 +657,9 @@ export function createAirHockeyGame(ctx) {
         statusEl.textContent = `A ${WIN_SCORE} goles`;
         sfx.countdownPip(true);
         launchServe();
+        if (mode === 'online' && isHost) {
+          sendAuthoritativeSnapNow();
+        }
       }
       return;
     }
@@ -546,115 +671,78 @@ export function createAirHockeyGame(ctx) {
       moveMallet(state.p1, H / 2 + MALLET_R * 0.95, H - MALLET_R, subDt);
       moveMallet(state.p2, MALLET_R, H / 2 - MALLET_R * 0.95, subDt);
 
+      const goalScorer = stepPuckAndWalls(subDt, true);
+      if (goalScorer) {
+        handleGoal(goalScorer);
+        return;
+      }
+
+      const hit1 = collideMalletPuck(state.p1, '#f58229', false);
+      let hit2 = false;
+      // In online mode, Guest handles immediate p2 strikes; Host only acts as fallback if no recent GUEST_HIT
+      if (mode !== 'online' || now > hostIgnoreP2CollideUntil) {
+        hit2 = collideMalletPuck(state.p2, '#1ad1be', false);
+      }
+
+      if ((hit1 || hit2) && mode === 'online' && isHost) {
+        lastSnapSentAt = now;
+        sendAuthoritativeSnapNow();
+      }
+
       const p = state.puck;
-      p.x += p.vx * subDt;
-      p.y += p.vy * subDt;
-
-      const damp = Math.pow(FRICTION, subDt * 60);
-      p.vx *= damp;
-      p.vy *= damp;
-
-      // Side rails
-      if (p.x < PUCK_R) {
-        p.x = PUCK_R;
-        p.vx = Math.abs(p.vx) * 0.94;
-        sfx.wallHit(Math.abs(p.vx) * 0.5);
-      } else if (p.x > 1 - PUCK_R) {
-        p.x = 1 - PUCK_R;
-        p.vx = -Math.abs(p.vx) * 0.94;
-        sfx.wallHit(Math.abs(p.vx) * 0.5);
-      }
-
-      const inGoalMouth = p.x > 0.5 - GOAL_HALF + PUCK_R * 0.35 && p.x < 0.5 + GOAL_HALF - PUCK_R * 0.35;
-
-      // Top rail / Goal 2 (P1 scores!)
-      if (inGoalMouth) {
-        if (p.y < -PUCK_R * 0.35) {
-          handleGoal(1);
-          return;
-        }
-      } else if (p.y < PUCK_R) {
-        p.y = PUCK_R;
-        p.vy = Math.abs(p.vy) * 0.94;
-        // Soft corner push so puck never stalls in corners
-        if (p.x < 0.12) p.vx += 0.18;
-        if (p.x > 0.88) p.vx -= 0.18;
-        sfx.wallHit(Math.abs(p.vy) * 0.5);
-      }
-
-      // Bottom rail / Goal 1 (P2 scores!)
-      if (inGoalMouth) {
-        if (p.y > H + PUCK_R * 0.35) {
-          handleGoal(2);
-          return;
-        }
-      } else if (p.y > H - PUCK_R) {
-        p.y = H - PUCK_R;
-        p.vy = -Math.abs(p.vy) * 0.94;
-        if (p.x < 0.12) p.vx += 0.18;
-        if (p.x > 0.88) p.vx -= 0.18;
-        sfx.wallHit(Math.abs(p.vy) * 0.5);
-      }
-
-      // Goal post circular bumpers
-      const posts = [
-        { x: 0.5 - GOAL_HALF, y: 0 },
-        { x: 0.5 + GOAL_HALF, y: 0 },
-        { x: 0.5 - GOAL_HALF, y: H },
-        { x: 0.5 + GOAL_HALF, y: H }
-      ];
-      for (const post of posts) {
-        const dx = p.x - post.x;
-        const dy = p.y - post.y;
-        const dist = Math.hypot(dx, dy);
-        if (dist < PUCK_R && dist > 1e-5) {
-          const nx = dx / dist;
-          const ny = dy / dist;
-          p.x = post.x + nx * PUCK_R;
-          p.y = post.y + ny * PUCK_R;
-          const dot = p.vx * nx + p.vy * ny;
-          if (dot < 0) {
-            p.vx -= 1.9 * dot * nx;
-            p.vy -= 1.9 * dot * ny;
-            sfx.wallHit(0.6);
-          }
-        }
-      }
-
-      collideMalletPuck(state.p1, '#f58229');
-      collideMalletPuck(state.p2, '#1ad1be');
-
-      // Anti-stall nudge if puck stops dead near center line
       if (Math.hypot(p.vx, p.vy) < 0.04 && Math.abs(p.y - H / 2) < 0.08) {
         p.vy = p.y >= H / 2 ? 0.32 : -0.32;
       }
     }
   }
 
-  function stepGuestInterpolation(dt) {
-    // Move own mallet locally for zero-latency feel
+  // Client-Side Predicted Simulation for Guest (0ms own mallet + 0ms local puck strike!)
+  function stepGuestSimulation(dt, now) {
+    // 1. Own mallet moves with 0ms local latency (never rubberbanded by Host!)
     moveMallet(state.p2, MALLET_R, H / 2 - MALLET_R * 0.95, dt);
 
-    if (!netTarget.hasSnapshot) return;
-    const blend = Math.min(1, dt * 22);
-    state.p1.x += (netTarget.p1x - state.p1.x) * blend;
-    state.p1.y += (netTarget.p1y - state.p1.y) * blend;
-
-    // Softly reconcile own mallet with authoritative position if far off
-    if (Math.hypot(netTarget.p2x - state.p2.x, netTarget.p2y - state.p2.y) > 0.14) {
-      state.p2.x += (netTarget.p2x - state.p2.x) * 0.35;
-      state.p2.y += (netTarget.p2y - state.p2.y) * 0.35;
+    // 2. Smoothly interpolate opponent (Host) mallet
+    if (netTarget.hasSnapshot) {
+      const malletBlend = Math.min(1, dt * 24);
+      state.p1.x += (netTarget.p1x - state.p1.x) * malletBlend;
+      state.p1.y += (netTarget.p1y - state.p1.y) * malletBlend;
     }
 
-    if (state.phase === 'playing') {
-      // Extrapolate + smooth puck
-      state.puck.x += netTarget.pvx * dt;
-      state.puck.y += netTarget.pvy * dt;
-      state.puck.x += (netTarget.px - state.puck.x) * Math.min(1, dt * 18);
-      state.puck.y += (netTarget.py - state.puck.y) * Math.min(1, dt * 18);
-    } else {
-      state.puck.x = netTarget.px;
-      state.puck.y = netTarget.py;
+    if (state.phase !== 'playing') {
+      if (netTarget.hasSnapshot) {
+        state.puck.x = netTarget.px;
+        state.puck.y = netTarget.py;
+      }
+      return;
+    }
+
+    // 3. Sub-stepped local puck physics + instant local strike detection on Guest's half!
+    const subSteps = 3;
+    const subDt = dt / subSteps;
+    for (let s = 0; s < subSteps; s++) {
+      stepPuckAndWalls(subDt, false);
+      collideMalletPuck(state.p2, '#1ad1be', true);
+    }
+
+    // 4. Gently reconcile puck with Host snapshots ONLY when not in post-local-strike hold window
+    if (netTarget.hasSnapshot && now > guestHitHoldUntil) {
+      const errDist = Math.hypot(netTarget.px - state.puck.x, netTarget.py - state.puck.y);
+      if (errDist > 0.36) {
+        state.puck.x = netTarget.px;
+        state.puck.y = netTarget.py;
+        state.puck.vx = netTarget.pvx;
+        state.puck.vy = netTarget.pvy;
+      } else {
+        const posBlend = Math.min(1, dt * 13);
+        const velBlend = Math.min(1, dt * 16);
+        state.puck.x += (netTarget.px - state.puck.x) * posBlend;
+        state.puck.y += (netTarget.py - state.puck.y) * posBlend;
+        state.puck.vx += (netTarget.pvx - state.puck.vx) * velBlend;
+        state.puck.vy += (netTarget.pvy - state.puck.vy) * velBlend;
+      }
+      // Advance netTarget alongside physics so reconciliation targets current time, not past time!
+      netTarget.px = clamp(netTarget.px + netTarget.pvx * dt, PUCK_R, 1 - PUCK_R);
+      netTarget.py = clamp(netTarget.py + netTarget.pvy * dt, 0, H);
     }
   }
 
@@ -699,7 +787,6 @@ export function createAirHockeyGame(ctx) {
     const Wpx = logicalPxWidth;
     const Hpx = logicalPxHeight;
 
-    // Rink matte surface
     g.fillStyle = '#0d1116';
     g.fillRect(0, 0, Wpx, Hpx);
 
@@ -711,7 +798,6 @@ export function createAirHockeyGame(ctx) {
       flashAlpha = Math.max(0, flashAlpha - dt * 1.4);
     }
 
-    // Markings: Center line, center circle, goal creases
     g.strokeStyle = 'rgba(240, 236, 228, 0.09)';
     g.lineWidth = 2;
 
@@ -726,31 +812,24 @@ export function createAirHockeyGame(ctx) {
     g.arc(Wpx / 2, Hpx / 2, Wpx * 0.16, 0, Math.PI * 2);
     g.stroke();
 
-    // Top & Bottom goal creases
     const topColor = flipView ? '#f58229' : '#1ad1be';
     const bottomColor = flipView ? '#1ad1be' : '#f58229';
-
     const goalLeftPx = (0.5 - GOAL_HALF) * Wpx;
     const goalWidthPx = GOAL_HALF * 2 * Wpx;
 
-    // Top goal semicircle & slot
     g.strokeStyle = 'rgba(240, 236, 228, 0.11)';
     g.beginPath();
     g.arc(Wpx / 2, 0, GOAL_HALF * Wpx, 0, Math.PI);
     g.stroke();
-
     g.fillStyle = topColor;
     g.fillRect(goalLeftPx, 0, goalWidthPx, 5);
 
-    // Bottom goal semicircle & slot
     g.beginPath();
     g.arc(Wpx / 2, Hpx, GOAL_HALF * Wpx, Math.PI, Math.PI * 2);
     g.stroke();
-
     g.fillStyle = bottomColor;
     g.fillRect(goalLeftPx, Hpx - 5, goalWidthPx, 5);
 
-    // Puck trail
     if (state.phase === 'playing') {
       const pv = toView(state.puck.x, state.puck.y);
       trail.push({ x: pv.x, y: pv.y });
@@ -766,7 +845,6 @@ export function createAirHockeyGame(ctx) {
       g.fill();
     }
 
-    // Sparks
     for (let i = sparks.length - 1; i >= 0; i--) {
       const sp = sparks[i];
       sp.x += sp.vx * dt;
@@ -785,11 +863,9 @@ export function createAirHockeyGame(ctx) {
       g.globalAlpha = 1;
     }
 
-    // Draw Mallets
     drawMallet(state.p1.x, state.p1.y, '#f58229', Wpx);
     drawMallet(state.p2.x, state.p2.y, '#1ad1be', Wpx);
 
-    // Draw Puck
     const puckPos = toView(state.puck.x, state.puck.y);
     const puckRpx = PUCK_R * Wpx;
 
@@ -809,16 +885,15 @@ export function createAirHockeyGame(ctx) {
     g.arc(puckPos.x, puckPos.y, puckRpx * 0.62, 0, Math.PI * 2);
     g.stroke();
 
-    // Countdown center badge
     if (state.phase === 'countdown') {
       const countNum = Math.max(1, Math.ceil(state.countdown));
       g.fillStyle = 'rgba(13, 17, 22, 0.78)';
       g.beginPath();
-      g.arc(Wpx / 2, Hpx / 2, 30, 0, Math.PI * 2);
+      g.arc(Wpx / 2, Hpx / 2, 28, 0, Math.PI * 2);
       g.fill();
 
       g.fillStyle = '#f4f1ea';
-      g.font = '700 24px "Space Grotesk", sans-serif';
+      g.font = '700 22px "Space Grotesk", sans-serif';
       g.textAlign = 'center';
       g.textBaseline = 'middle';
       g.fillText(String(countNum), Wpx / 2, Hpx / 2 + 1);
@@ -831,32 +906,27 @@ export function createAirHockeyGame(ctx) {
     const pos = toView(cx, cy);
     const r = MALLET_R * Wpx;
 
-    // Drop shadow
     g.beginPath();
     g.fillStyle = 'rgba(0, 0, 0, 0.5)';
-    g.arc(pos.x, pos.y + 4, r, 0, Math.PI * 2);
+    g.arc(pos.x, pos.y + 3.5, r, 0, Math.PI * 2);
     g.fill();
 
-    // Outer striker body
     g.beginPath();
     g.fillStyle = color;
     g.arc(pos.x, pos.y, r, 0, Math.PI * 2);
     g.fill();
 
-    // Recessed handle grip
     g.beginPath();
     g.fillStyle = '#171d24';
     g.arc(pos.x, pos.y, r * 0.56, 0, Math.PI * 2);
     g.fill();
 
-    // Center cap
     g.beginPath();
     g.fillStyle = color;
     g.arc(pos.x, pos.y, r * 0.24, 0, Math.PI * 2);
     g.fill();
   }
 
-  // Main animation loop
   let rafId = null;
   let prevTime = performance.now();
 
@@ -867,26 +937,14 @@ export function createAirHockeyGame(ctx) {
     updateKeyboardTargets(dt);
 
     if (mode !== 'online' || isHost) {
-      stepAuthoritativePhysics(dt);
+      stepAuthoritativePhysics(dt, now);
 
-      if (mode === 'online' && isHost && now - lastSnapSentAt >= 20) {
+      if (mode === 'online' && isHost && now - lastSnapSentAt >= 22) {
         lastSnapSentAt = now;
-        sendNet({
-          kind: 'SNAP',
-          p1x: +state.p1.x.toFixed(4),
-          p1y: +state.p1.y.toFixed(4),
-          p2x: +state.p2.x.toFixed(4),
-          p2y: +state.p2.y.toFixed(4),
-          px: +state.puck.x.toFixed(4),
-          py: +state.puck.y.toFixed(4),
-          pvx: +state.puck.vx.toFixed(3),
-          pvy: +state.puck.vy.toFixed(3),
-          ph: state.phase,
-          cd: +state.countdown.toFixed(2)
-        });
+        sendAuthoritativeSnapNow();
       }
     } else {
-      stepGuestInterpolation(dt);
+      stepGuestSimulation(dt, now);
     }
 
     render(dt);
@@ -901,6 +959,7 @@ export function createAirHockeyGame(ctx) {
     state.winner = 0;
     state.serveTo = 0;
     lastCountdownBeep = 3;
+    lastRxSnapSeq = 0;
     resultBox.classList.add('hidden');
     resetPositions(0);
     refreshScoreText();
@@ -930,33 +989,57 @@ export function createAirHockeyGame(ctx) {
   window.addEventListener('resize', resizeCanvas);
 
   refreshHudLabels();
-  resizeCanvas();
+  requestAnimationFrame(() => resizeCanvas());
   resetPositions(0);
   rafId = requestAnimationFrame(frame);
 
   return {
     onNetMessage(msg) {
       if (!msg) return;
+
       if (msg.kind === 'INPUT' && isHost) {
+        if (msg.seq && msg.seq < lastRxInputSeq) return;
+        if (msg.seq) lastRxInputSeq = msg.seq;
         state.p2.tx = clamp(Number(msg.tx) || 0.5, MALLET_R, 1 - MALLET_R);
         state.p2.ty = clamp(Number(msg.ty) || 0.22, MALLET_R, H / 2 - MALLET_R * 0.95);
         return;
       }
 
+      if (msg.kind === 'GUEST_HIT' && isHost) {
+        if (msg.seq && msg.seq <= lastRxGuestHitSeq) return;
+        if (msg.seq) lastRxGuestHitSeq = msg.seq;
+        if (state.phase === 'playing' && msg.py < H * 0.72) {
+          state.puck.x = clamp(Number(msg.px) || 0.5, PUCK_R, 1 - PUCK_R);
+          state.puck.y = clamp(Number(msg.py) || 0.3, PUCK_R, H - PUCK_R);
+          state.puck.vx = clamp(Number(msg.pvx) || 0, -MAX_PUCK_SPEED, MAX_PUCK_SPEED);
+          state.puck.vy = clamp(Number(msg.pvy) || 0, -MAX_PUCK_SPEED, MAX_PUCK_SPEED);
+          hostIgnoreP2CollideUntil = performance.now() + 180;
+          sfx.puckHit(msg.s || 0.8);
+          spawnSparks(msg.hx || state.puck.x, msg.hy || state.puck.y, '#1ad1be', 9);
+          sendAuthoritativeSnapNow();
+        }
+        return;
+      }
+
       if (msg.kind === 'SNAP' && !isHost) {
+        if (msg.seq && msg.seq <= lastRxSnapSeq) return;
+        if (msg.seq) lastRxSnapSeq = msg.seq;
+
         netTarget.p1x = msg.p1x;
         netTarget.p1y = msg.p1y;
-        netTarget.p2x = msg.p2x;
-        netTarget.p2y = msg.p2y;
         netTarget.px = msg.px;
         netTarget.py = msg.py;
         netTarget.pvx = msg.pvx;
         netTarget.pvy = msg.pvy;
+
         if (!netTarget.hasSnapshot) {
           state.puck.x = msg.px;
           state.puck.y = msg.py;
+          state.puck.vx = msg.pvx;
+          state.puck.vy = msg.pvy;
           netTarget.hasSnapshot = true;
         }
+
         if (msg.ph === 'countdown') {
           const prevCeil = Math.ceil(state.countdown);
           state.phase = 'countdown';
@@ -966,6 +1049,10 @@ export function createAirHockeyGame(ctx) {
           statusEl.textContent = nextCeil > 0 ? `Saque en ${nextCeil}…` : '¡Ya!';
         } else if (msg.ph === 'playing' && state.phase !== 'playing') {
           state.phase = 'playing';
+          state.puck.x = msg.px;
+          state.puck.y = msg.py;
+          state.puck.vx = msg.pvx;
+          state.puck.vy = msg.pvy;
           statusEl.textContent = `A ${WIN_SCORE} goles`;
           sfx.countdownPip(true);
         }
@@ -984,6 +1071,7 @@ export function createAirHockeyGame(ctx) {
         state.phase = msg.phase;
         state.winner = msg.winner;
         state.serveTo = msg.serveTo;
+        guestHitHoldUntil = 0;
         refreshScoreText();
 
         const scoredByMe = msg.scorer === localPlayerIndex;
@@ -1016,6 +1104,7 @@ export function createAirHockeyGame(ctx) {
 
     destroy() {
       if (rafId) cancelAnimationFrame(rafId);
+      resizeObserver?.disconnect();
       canvas.removeEventListener('pointerdown', onPointerDown);
       canvas.removeEventListener('pointermove', onPointerMove);
       canvas.removeEventListener('pointerup', onPointerUp);

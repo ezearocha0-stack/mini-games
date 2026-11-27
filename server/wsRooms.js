@@ -24,7 +24,11 @@ function safeSend(ws, data) {
 }
 
 export function attachRoomWebSocketServer(httpServer) {
-  const wss = new WebSocketServer({ noServer: true, maxPayload: 64 * 1024 });
+  const wss = new WebSocketServer({
+    noServer: true,
+    perMessageDeflate: false,
+    maxPayload: 64 * 1024
+  });
   const rooms = new Map(); // code -> { host: ws, guest: ws | null, createdAt: number }
 
   // Cleanup stale empty rooms periodically
@@ -45,6 +49,8 @@ export function attachRoomWebSocketServer(httpServer) {
     if (pathname !== '/ws') {
       return;
     }
+    // Disable Nagle's algorithm so small 60Hz game packets dispatch immediately
+    socket.setNoDelay?.(true);
     wss.handleUpgrade(request, socket, head, (ws) => {
       wss.emit('connection', ws, request);
     });
@@ -121,14 +127,30 @@ export function attachRoomWebSocketServer(httpServer) {
         return;
       }
 
-      // 3. Relay game/session packet directly to the paired peer in O(1)
-      if (msg.sys === 'RELAY' && ws.roomCode) {
-        const room = rooms.get(ws.roomCode);
-        if (!room) return;
-        const target = ws.role === 'host' ? room.guest : room.host;
-        if (target && target.readyState === 1) {
-          safeSend(target, { sys: 'PACKET', payload: msg.payload });
+      if (!ws.roomCode) return;
+      const room = rooms.get(ws.roomCode);
+      if (!room) return;
+      const target = ws.role === 'host' ? room.guest : room.host;
+      if (!target || target.readyState !== 1) return;
+
+      // 3. Volatile high-frequency frames (drop immediately if target socket has backlog!)
+      if (msg.sys === 'VOLATILE') {
+        if (target.bufferedAmount > 2048) {
+          return; // Never queue stale physics frames behind a TCP retransmit
         }
+        safeSend(target, { sys: 'PACKET', payload: msg.payload });
+        return;
+      }
+
+      // 4. WebRTC SDP/ICE signaling to upgrade to direct P2P UDP fast-lane
+      if (msg.sys === 'RTC_SIGNAL') {
+        safeSend(target, { sys: 'RTC_SIGNAL', signal: msg.signal });
+        return;
+      }
+
+      // 5. Reliable game/session packet
+      if (msg.sys === 'RELAY') {
+        safeSend(target, { sys: 'PACKET', payload: msg.payload });
       }
     });
 

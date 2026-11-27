@@ -31,7 +31,6 @@ function getInitialPlayerName() {
   return generated;
 }
 
-// Application State
 const appState = {
   localName: getInitialPlayerName(),
   localDevice: detectDeviceType(),
@@ -45,11 +44,11 @@ const appState = {
   wakeLock: null
 };
 
-// DOM References
 const el = {
   btnHomeBrand: document.getElementById('btn-home-brand'),
   btnInstallPwa: document.getElementById('btn-install-pwa'),
   btnFullscreen: document.getElementById('btn-fullscreen'),
+  btnStageFullscreen: document.getElementById('btn-stage-fullscreen'),
   btnToggleSound: document.getElementById('btn-toggle-sound'),
   iconSoundOn: document.getElementById('icon-sound-on'),
   iconSoundOff: document.getElementById('icon-sound-off'),
@@ -66,6 +65,7 @@ const el = {
   sessionP1Wins: document.getElementById('session-p1-wins'),
   sessionP2Wins: document.getElementById('session-p2-wins'),
   reactionBar: document.getElementById('reaction-bar'),
+  stageMiniReactions: document.getElementById('stage-mini-reactions'),
   btnOpenInvite: document.getElementById('btn-open-invite'),
   btnLeaveRoom: document.getElementById('btn-leave-room'),
 
@@ -109,21 +109,49 @@ const el = {
   inputPlayerName: document.getElementById('input-player-name')
 };
 
-// Toast Notifications
 function showToast(message, isReaction = false) {
   const item = document.createElement('div');
   item.className = `toast-item${isReaction ? ' reaction' : ''}`;
   item.textContent = message;
   el.toastStack.appendChild(item);
 
-  setTimeout(() => {
-    item.style.opacity = '0';
-    item.style.transition = 'opacity 0.2s ease';
-    setTimeout(() => item.remove(), 220);
-  }, isReaction ? 2200 : 2800);
+  setTimeout(
+    () => {
+      item.style.opacity = '0';
+      item.style.transition = 'opacity 0.2s ease';
+      setTimeout(() => item.remove(), 220);
+    },
+    isReaction ? 2000 : 2600
+  );
 }
 
-// Screen Wake Lock (prevents Android screen sleep during gameplay)
+// Cross-browser Fullscreen Toggle (Android Chrome, Desktop, Webkit)
+async function toggleFullscreen() {
+  const doc = document;
+  const root = document.documentElement;
+  const isFs = Boolean(doc.fullscreenElement || doc.webkitFullscreenElement);
+
+  try {
+    if (!isFs) {
+      if (root.requestFullscreen) {
+        await root.requestFullscreen({ navigationUI: 'hide' });
+      } else if (root.webkitRequestFullscreen) {
+        root.webkitRequestFullscreen();
+      } else {
+        throw new Error('UNSUPPORTED');
+      }
+    } else {
+      if (doc.exitFullscreen) {
+        await doc.exitFullscreen();
+      } else if (doc.webkitExitFullscreen) {
+        doc.webkitExitFullscreen();
+      }
+    }
+  } catch {
+    showToast('En móvil también puedes usar "Instalar App" para pantalla completa');
+  }
+}
+
 async function acquireWakeLock() {
   if (!('wakeLock' in navigator) || appState.wakeLock) return;
   try {
@@ -131,9 +159,7 @@ async function acquireWakeLock() {
     appState.wakeLock.addEventListener('release', () => {
       appState.wakeLock = null;
     });
-  } catch {
-    // Ignore if browser denies wake lock
-  }
+  } catch {}
 }
 
 function releaseWakeLock() {
@@ -149,7 +175,6 @@ document.addEventListener('visibilitychange', () => {
   }
 });
 
-// Build player roster object { 1: {...}, 2: {...} }
 function getMatchPlayers(mode) {
   if (mode === 'online') {
     const remote = p2p.remoteProfile || { name: 'Rival', device: 'Remoto' };
@@ -178,15 +203,14 @@ function getMatchPlayers(mode) {
   };
 }
 
-// Initialize P2P Network Session
 const p2p = new P2PSession({
   getLocalProfile: () => ({
     name: appState.localName,
     device: appState.localDevice
   }),
 
-  onStatusChange: (info) => {
-    refreshSessionUi(info);
+  onStatusChange: () => {
+    refreshSessionUi();
   },
 
   onPeerProfile: (remote) => {
@@ -199,7 +223,6 @@ const p2p = new P2PSession({
       appState.gameInstance.updatePlayers(getMatchPlayers('online'));
     }
 
-    // If Host was waiting to launch a specific game, or already has a game open, sync Guest!
     if (p2p.isHost()) {
       const targetGame = appState.pendingOnlineAutoLaunchGame || appState.activeGameId;
       appState.pendingOnlineAutoLaunchGame = null;
@@ -272,8 +295,25 @@ function handleNetPacket(packet) {
   }
 }
 
+function updateStageBadge() {
+  if (!appState.activeGameId) return;
+  if (appState.activeMode === 'online') {
+    const pingPart = p2p.rttMs !== null ? ` · ${p2p.rttMs}ms` : '';
+    el.stageModeBadge.textContent = `${p2p.roomCode || 'P2P'}${pingPart}`;
+  } else if (appState.activeMode === 'ai') {
+    el.stageModeBadge.textContent = 'vs IA';
+  } else {
+    el.stageModeBadge.textContent = '2J Local';
+  }
+}
+
 function refreshSessionUi() {
   const status = p2p.status;
+  updateStageBadge();
+  el.stageMiniReactions?.classList.toggle(
+    'hidden',
+    !(appState.activeMode === 'online' && p2p.isConnected())
+  );
 
   if (status === 'idle') {
     el.sessionStrip.classList.add('hidden');
@@ -292,18 +332,19 @@ function refreshSessionUi() {
     el.sessionStatusText.textContent = remote
       ? `Conectado con ${remote.name} (${remote.device})`
       : 'Conectado en tiempo real';
+    const modeLabel = p2p.hasDirectUdpFastLane() ? 'Directo UDP' : 'Tiempo real';
     const pingPart = p2p.rttMs !== null ? ` · ${p2p.rttMs} ms` : '';
-    el.sessionSubtext.textContent = `Sala ${p2p.roomCode} · WebRTC P2P${pingPart}`;
+    el.sessionSubtext.textContent = `Sala ${p2p.roomCode} · ${modeLabel}${pingPart}`;
     el.connectPanel.classList.add('hidden');
     el.hubModeIndicator.textContent =
-      'Sala P2P activa: toca cualquier juego para iniciarlo en ambos dispositivos a la vez';
+      'Sala activa: toca cualquier juego para iniciarlo en ambos dispositivos a la vez';
   } else if (status === 'creating' || status === 'waiting' || status === 'joining') {
     el.sessionStatusDot.classList.add('waiting');
     el.sessionStatusText.textContent =
       status === 'joining'
         ? `Conectando a la sala ${p2p.roomCode}…`
         : `Esperando jugador en sala ${p2p.roomCode || '…'}`;
-    el.sessionSubtext.textContent = ' Comparte el código o escanea el QR desde el otro dispositivo';
+    el.sessionSubtext.textContent = 'Comparte el código o escanea el QR desde el otro dispositivo';
     el.connectPanel.classList.remove('hidden');
   } else {
     el.sessionStatusDot.classList.add('error');
@@ -322,7 +363,6 @@ function refreshSessionUi() {
   el.btnOpenInvite.classList.toggle('hidden', !p2p.roomCode);
 }
 
-// Launch or Switch Active Game
 function launchGame(gameId, mode, fromRemote = false) {
   const spec = GAME_CATALOG[gameId];
   if (!spec) return;
@@ -335,17 +375,14 @@ function launchGame(gameId, mode, fromRemote = false) {
   appState.activeGameId = gameId;
   appState.activeMode = mode;
 
+  document.body.classList.add('in-game');
+  window.scrollTo(0, 0);
+
   el.viewHub.classList.add('hidden');
   el.viewGame.classList.remove('hidden');
   el.stageGameTitle.textContent = spec.title;
-
-  if (mode === 'online') {
-    el.stageModeBadge.textContent = `P2P · Sala ${p2p.roomCode}`;
-  } else if (mode === 'ai') {
-    el.stageModeBadge.textContent = '1 Jugador vs IA';
-  } else {
-    el.stageModeBadge.textContent = '2 Jugadores Local';
-  }
+  updateStageBadge();
+  el.stageMiniReactions?.classList.toggle('hidden', !(mode === 'online' && p2p.isConnected()));
 
   const isHost = mode !== 'online' || p2p.isHost();
   const localPlayerIndex = mode === 'online' ? (p2p.isHost() ? 1 : 2) : 1;
@@ -361,6 +398,15 @@ function launchGame(gameId, mode, fromRemote = false) {
     sendNet: (payload) => {
       if (mode === 'online') {
         p2p.send({
+          type: 'GAME_EVENT',
+          game: gameId,
+          payload
+        });
+      }
+    },
+    sendFastNet: (payload) => {
+      if (mode === 'online') {
+        p2p.sendFast({
           type: 'GAME_EVENT',
           game: gameId,
           payload
@@ -396,6 +442,7 @@ function returnToHub(fromRemote = false) {
   appState.activeMode = null;
   el.gameMount.innerHTML = '';
 
+  document.body.classList.remove('in-game');
   el.viewGame.classList.add('hidden');
   el.viewHub.classList.remove('hidden');
 
@@ -408,7 +455,6 @@ function returnToHub(fromRemote = false) {
   }
 }
 
-// Open Invite / QR Modal
 async function openInviteModal(roomCode) {
   if (!roomCode) return;
   el.inviteRoomCode.textContent = roomCode;
@@ -421,9 +467,7 @@ async function openInviteModal(roomCode) {
 
   try {
     await renderRoomQr(el.qrCanvas, roomCode);
-  } catch {
-    // QR canvas fallback handled gracefully
-  }
+  } catch {}
 }
 
 async function startHostingRoom(autoGameId = null) {
@@ -461,9 +505,20 @@ async function joinExistingRoom(rawCode) {
   }
 }
 
-// Event Bindings
+function bindReactionButtons(rootEl) {
+  if (!rootEl) return;
+  rootEl.querySelectorAll('[data-react]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const text = btn.getAttribute('data-react');
+      if (!text || !p2p.isConnected()) return;
+      sfx.click();
+      p2p.send({ type: 'REACTION', text });
+      showToast(`Tú: ${text}`, true);
+    });
+  });
+}
+
 function bindUiEvents() {
-  // Profile UI init
   el.labelPlayerName.textContent = appState.localName;
   el.labelDeviceBadge.textContent = appState.localDevice;
   updateSoundIcon();
@@ -485,7 +540,6 @@ function bindUiEvents() {
     appState.gameInstance?.restart?.(false);
   });
 
-  // Sound toggle
   el.btnToggleSound.addEventListener('click', () => {
     const muted = sfx.toggleMuted();
     updateSoundIcon();
@@ -493,21 +547,16 @@ function bindUiEvents() {
     showToast(muted ? 'Sonido silenciado' : 'Sonido activado');
   });
 
-  // Fullscreen toggle
-  el.btnFullscreen.addEventListener('click', async () => {
+  el.btnFullscreen.addEventListener('click', () => {
     sfx.click();
-    try {
-      if (!document.fullscreenElement) {
-        await document.documentElement.requestFullscreen();
-      } else {
-        await document.exitFullscreen();
-      }
-    } catch {
-      showToast('Usa "Instalar App" o "Añadir a pantalla de inicio" para pantalla completa');
-    }
+    toggleFullscreen();
   });
 
-  // Profile Modal
+  el.btnStageFullscreen?.addEventListener('click', () => {
+    sfx.click();
+    toggleFullscreen();
+  });
+
   el.btnEditProfile.addEventListener('click', () => {
     sfx.click();
     el.inputPlayerName.value = appState.localName;
@@ -536,7 +585,6 @@ function bindUiEvents() {
     showToast(`Apodo actualizado: ${clean}`);
   });
 
-  // Create & Join P2P Room
   el.btnCreateRoom.addEventListener('click', () => {
     sfx.ensureContext();
     sfx.click();
@@ -554,7 +602,6 @@ function bindUiEvents() {
     joinExistingRoom(el.inputRoomCode.value);
   });
 
-  // Session Strip Controls
   el.btnOpenInvite.addEventListener('click', () => {
     sfx.click();
     openInviteModal(p2p.roomCode);
@@ -567,20 +614,12 @@ function bindUiEvents() {
     }
     p2p.leave();
     releaseWakeLock();
-    showToast('Saliste de la sala P2P');
+    showToast('Saliste de la sala');
   });
 
-  el.reactionBar.querySelectorAll('[data-react]').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      const text = btn.getAttribute('data-react');
-      if (!text || !p2p.isConnected()) return;
-      sfx.click();
-      p2p.send({ type: 'REACTION', text });
-      showToast(`Tú: ${text}`, true);
-    });
-  });
+  bindReactionButtons(el.reactionBar);
+  bindReactionButtons(el.stageMiniReactions);
 
-  // Invite Modal Actions
   el.btnCloseInviteModal.addEventListener('click', () => {
     el.modalInvite.classList.add('hidden');
   });
@@ -618,12 +657,9 @@ function bindUiEvents() {
         text: `Únete a mi partida (PC ↔ Android) con el código ${p2p.roomCode}:`,
         url
       });
-    } catch {
-      // User cancelled share sheet
-    }
+    } catch {}
   });
 
-  // Game Cards Click -> If P2P connected, launch immediately for both! Otherwise open Mode Picker
   document.querySelectorAll('[data-game]').forEach((btn) => {
     btn.addEventListener('click', () => {
       sfx.ensureContext();
@@ -650,7 +686,6 @@ function bindUiEvents() {
     });
   });
 
-  // Mode Picker Modal Buttons
   el.btnCloseModeModal.addEventListener('click', () => {
     el.modalModePicker.classList.add('hidden');
   });
@@ -682,7 +717,6 @@ function bindUiEvents() {
     }
   });
 
-  // Close modals on backdrop click or Escape
   [el.modalModePicker, el.modalInvite, el.modalProfile].forEach((backdrop) => {
     backdrop.addEventListener('click', (e) => {
       if (e.target === backdrop) backdrop.classList.add('hidden');
@@ -697,7 +731,6 @@ function bindUiEvents() {
     }
   });
 
-  // PWA Install Prompt (Android Chrome / Desktop Edge & Chrome)
   window.addEventListener('beforeinstallprompt', (e) => {
     e.preventDefault();
     appState.deferredInstallPrompt = e;
@@ -739,7 +772,6 @@ function checkAutoJoinUrlParam() {
   const params = new URLSearchParams(window.location.search);
   const roomParam = normalizeRoomCode(params.get('room'));
   if (roomParam.length === 5) {
-    // Clean URL query parameter so page reloads stay clean
     const cleanUrl = window.location.origin + window.location.pathname;
     window.history.replaceState({}, document.title, cleanUrl);
     el.inputRoomCode.value = roomParam;
@@ -749,7 +781,6 @@ function checkAutoJoinUrlParam() {
   }
 }
 
-// Boot
 bindUiEvents();
 registerServiceWorker();
 checkAutoJoinUrlParam();
